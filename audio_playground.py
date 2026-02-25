@@ -642,93 +642,7 @@ class ReverseVortex:
 
 
 # ═════════════════════════════════════════════════════════════
-#  7. STEREO PENDULUM  (pan)
-# ═════════════════════════════════════════════════════════════
-
-class StereoPendulum:
-    NAME = "STEREO SWING"
-
-    def __init__(self, cx, cy, engine):
-        self.eng = engine
-        self.cx, self.cy = cx, cy
-        self.arm_len = 90
-        self.angle = 0.4
-        self.vel = 0.0
-        self.amp = 0.6
-        self.grabbed = False
-        self.bob_r = 14
-
-    def reset(self):
-        self.angle = 0.0
-        self.vel = 0.0
-        self.amp = 0.5
-        self.grabbed = False
-        self.eng.pan = 0.0
-
-    def _bob(self):
-        bx = self.cx + math.sin(self.angle) * self.arm_len
-        by = self.cy + math.cos(self.angle) * self.arm_len
-        return bx, by
-
-    def handle(self, ev, mx, my):
-        bx, by = self._bob()
-        if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
-            if math.hypot(mx - bx, my - by) < self.bob_r + 14:
-                self.grabbed = True
-                return True
-        if ev.type == pygame.MOUSEBUTTONUP and ev.button == 1:
-            self.grabbed = False
-        return False
-
-    def update(self, mx, my, dt):
-        if self.grabbed:
-            dx = mx - self.cx
-            self.angle = math.atan2(dx, self.arm_len)
-            self.angle = max(-1.2, min(1.2, self.angle))
-            self.vel = 0
-            self.amp = min(1.0, abs(self.angle) / 0.7)
-        else:
-            gravity = -9.8 * math.sin(self.angle) / (self.arm_len * 0.012)
-            self.vel += gravity * dt
-            self.vel *= 0.998
-            self.angle += self.vel * dt
-            if abs(self.angle) < 0.01 and abs(self.vel) < 0.3:
-                self.vel += random.choice([-1, 1]) * self.amp * 1.5
-        self.eng.pan = math.sin(self.angle) * self.amp
-
-    def draw(self, surf):
-        bx, by = self._bob()
-        pygame.draw.circle(surf, (80, 80, 100), (self.cx, self.cy), 5)
-        pygame.draw.line(surf, (70, 70, 90),
-                         (self.cx, self.cy), (int(bx), int(by)), 2)
-        bar_y = self.cy - 20
-        bar_w = 120
-        pygame.draw.line(surf, (40, 40, 55),
-                         (self.cx - bar_w // 2, bar_y),
-                         (self.cx + bar_w // 2, bar_y), 1)
-        f12 = font(12)
-        surf.blit(f12.render("L", True, (100, 100, 180)),
-                  (self.cx - bar_w // 2 - 12, bar_y - 6))
-        surf.blit(f12.render("R", True, (180, 100, 100)),
-                  (self.cx + bar_w // 2 + 4, bar_y - 6))
-        pan_x = self.cx + int(self.eng.pan * bar_w // 2)
-        col = (100, 150, 255) if self.eng.pan < 0 else (255, 150, 100)
-        pygame.draw.circle(surf, col, (pan_x, bar_y), 6)
-        hue = (0.6 + self.eng.pan * 0.15) % 1
-        rgb = [int(v * 255) for v in colorsys.hsv_to_rgb(hue, 0.6, 0.9)]
-        if abs(self.vel) > 0.8:
-            gs = pygame.Surface((60, 60), pygame.SRCALPHA)
-            pygame.draw.circle(gs, (*rgb, min(120, int(abs(self.vel) * 18))),
-                               (30, 30), 25)
-            surf.blit(gs, (int(bx) - 30, int(by) - 30))
-        pygame.draw.circle(surf, rgb, (int(bx), int(by)), self.bob_r)
-        f = font(14)
-        surf.blit(f.render(self.NAME, True, (140, 140, 200)),
-                  (self.cx - 50, self.cy - 40))
-
-
-# ═════════════════════════════════════════════════════════════
-#  8. TIME SPIRAL  (speed)
+#  7. TIME SPIRAL  (speed)
 # ═════════════════════════════════════════════════════════════
 
 class TimeSpiral:
@@ -944,154 +858,283 @@ class SecretWobble:
 
 
 # ═════════════════════════════════════════════════════════════
-#  9. SPATIAL AUDIO ROOM
+#  9. 3D DRAGGABLE SPEAKER
 # ═════════════════════════════════════════════════════════════
 
-class SpatialRoom:
-    """2D room with a speaker in the center. Drag the listener
-    around to control pan (X-axis) and volume/muffling (distance)."""
+class DraggableSpeaker:
+    """3D speaker you can drag on the screen plane (X/Y) and scroll to
+    move along the Z-axis (depth – perpendicular to the screen).
 
-    def __init__(self, x, y, size, engine):
+    The listener is fixed at the screen centre.
+      • X position  → pan  (speaker left → sound from left)
+      • 3D distance  → volume attenuation + muffling
+      • Z depth      → "behind / in front" with visual perspective scale
+      • Scroll up    → speaker comes closer  (louder, brighter)
+      • Scroll down  → speaker moves away    (quieter, more muffled)
+
+    Mini buttons: [B] bass boost  |  [M] mute  |  [1] mono
+    """
+
+    Z_MIN = -1.0   # far behind the screen
+    Z_MAX =  1.0   # far in front of the screen
+
+    def __init__(self, engine):
         self.eng = engine
-        self.r = pygame.Rect(x, y, size, size)
-        self.cx = x + size // 2
-        self.cy = y + size // 2
-        self.size = size
-        # listener position (starts bottom-center)
-        self.lx = float(self.cx)
-        self.ly = float(self.cy + size * 0.35)
+        self.sx = WIDTH // 2 + 60
+        self.sy = HEIGHT // 2 - 40
+        self.sz = 0.0           # Z axis: -1 (far) .. 0 (screen plane) .. +1 (close)
         self.grabbed = False
-        self.trail: list = []  # recent positions for trail effect
-        self.pulse = 0.0       # speaker pulse animation
+        self.grab_off = (0, 0)
+        self.pulse = 0.0
+
+        # mini-button states
+        self.bass_on = False
+        self.muted = False
+        self.mono = False
+        self._btn_size = 22
 
     def reset(self):
-        self.lx = float(self.cx)
-        self.ly = float(self.cy + self.size * 0.35)
+        self.sx = WIDTH // 2 + 60
+        self.sy = HEIGHT // 2 - 40
+        self.sz = 0.0
         self.grabbed = False
+        self.bass_on = False
+        self.muted = False
+        self.mono = False
         self.eng.pan = 0.0
-        self.trail.clear()
+
+    # ── perspective helpers ──
+
+    def _scale(self):
+        """Return a visual scale factor  0.4 … 1.6  based on Z."""
+        return 1.0 + self.sz * 0.6    # z=-1 → 0.4,  z=0 → 1.0,  z=+1 → 1.6
+
+    # ── button rects (scale-aware) ──
+
+    def _btn_rects(self):
+        sc = self._scale()
+        sz = int(self._btn_size * sc)
+        bx = self.sx - int(sz * 1.6)
+        by = self.sy + int(34 * sc)
+        bass_r = pygame.Rect(bx, by, sz, sz)
+        mute_r = pygame.Rect(bx + sz + 4, by, sz, sz)
+        mono_r = pygame.Rect(bx + (sz + 4) * 2, by, sz, sz)
+        return bass_r, mute_r, mono_r
+
+    # ── events ──
 
     def handle(self, ev, mx, my):
+        bass_r, mute_r, mono_r = self._btn_rects()
+
         if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
-            if math.hypot(mx - self.lx, my - self.ly) < 18:
-                self.grabbed = True
+            if bass_r.collidepoint(mx, my):
+                self.bass_on = not self.bass_on
                 return True
+            if mute_r.collidepoint(mx, my):
+                self.muted = not self.muted
+                return True
+            if mono_r.collidepoint(mx, my):
+                self.mono = not self.mono
+                return True
+            # speaker body hit test (use scaled radius)
+            hit_r = 28 * self._scale()
+            if math.hypot(mx - self.sx, my - self.sy) < hit_r:
+                self.grabbed = True
+                self.grab_off = (self.sx - mx, self.sy - my)
+                return True
+
         if ev.type == pygame.MOUSEBUTTONUP and ev.button == 1:
             self.grabbed = False
+
+        # scroll wheel → Z axis
+        if ev.type == pygame.MOUSEWHEEL:
+            self.sz = float(np.clip(self.sz + ev.y * 0.08,
+                                    self.Z_MIN, self.Z_MAX))
+            return True
+
         return False
+
+    # ── update ──
 
     def update(self, mx, my, dt):
         if self.grabbed:
-            # clamp to room bounds with small margin
-            margin = 10
-            self.lx = float(np.clip(mx, self.r.left + margin, self.r.right - margin))
-            self.ly = float(np.clip(my, self.r.top + margin, self.r.bottom - margin))
+            margin = 40
+            self.sx = int(np.clip(mx + self.grab_off[0], margin, WIDTH - margin))
+            self.sy = int(np.clip(my + self.grab_off[1], margin, HEIGHT - 100))
 
-        # trail
-        self.trail.append((self.lx, self.ly))
-        if len(self.trail) > 30:
-            self.trail.pop(0)
+        self.pulse = (self.pulse + dt * 4.0) % (2 * math.pi)
 
-        # speaker pulse
-        self.pulse = (self.pulse + dt * 3.5) % (2 * math.pi)
+        # listener at screen centre
+        lcx, lcy = WIDTH / 2, HEIGHT / 2
+        half_w, half_h = WIDTH / 2, HEIGHT / 2
 
-        # compute relative position of listener to speaker
-        half = self.size / 2.0
-        # dx: -1 (left) to +1 (right)
-        dx = (self.lx - self.cx) / half
-        # dy: -1 (near/above speaker) to +1 (far below)
-        dy = (self.ly - self.cy) / half
-        # distance 0..1
-        dist = min(1.0, math.sqrt(dx * dx + dy * dy))
+        # normalised XY offset  -1..+1
+        dx = (self.sx - lcx) / half_w
+        dy = (self.sy - lcy) / half_h
 
-        # PAN  ─  X axis maps directly to stereo pan
-        self.eng.pan = float(np.clip(dx * 1.3, -1.0, 1.0))
+        # 3D Euclidean distance  (Z adds to distance)
+        dist_3d = min(1.0, math.sqrt(dx * dx + dy * dy + self.sz * self.sz))
 
-        # DISTANCE  ─  farther away = lower cutoff (muffled) + slight volume drop
-        # close = bright and full, far = dull and quieter
-        proximity = 1.0 - dist  # 1 = on speaker, 0 = edge
-        # nudge cutoff (don't fully override other widgets)
-        room_cutoff = 0.15 + proximity * 0.85   # 0.15 .. 1.0
-        self.eng.cutoff = min(self.eng.cutoff, room_cutoff)
+        # pan: speaker left → sound left
+        self.eng.pan = float(np.clip(dx * 1.4, -1.0, 1.0))
 
-        # slight volume attenuation at distance
-        room_vol_factor = 0.55 + proximity * 0.45   # 0.55 .. 1.0
-        self.eng.volume = min(self.eng.volume, room_vol_factor)
+        # proximity (inverse distance)
+        proximity = 1.0 - dist_3d
+
+        # muffling: close = open, far = dark
+        spk_cutoff = 0.08 + proximity * 0.92
+        self.eng.cutoff = min(self.eng.cutoff, spk_cutoff)
+
+        # volume attenuation
+        spk_vol = 0.30 + proximity * 0.70
+        if self.muted:
+            spk_vol = 0.0
+        self.eng.volume = min(self.eng.volume, spk_vol)
+
+        # bass boost
+        if self.bass_on:
+            self.eng.cutoff = min(self.eng.cutoff, 0.35)
+
+        # mono
+        if self.mono:
+            self.eng.pan = 0.0
+
+    # ── draw ──
 
     def draw(self, surf):
-        r = self.r
-        # room background
-        room_surf = pygame.Surface((r.width, r.height), pygame.SRCALPHA)
-        room_surf.fill((12, 12, 28, 200))
-        surf.blit(room_surf, (r.x, r.y))
-        pygame.draw.rect(surf, (50, 50, 80), r, 2, border_radius=4)
+        sx, sy = self.sx, self.sy
+        lcx, lcy = WIDTH // 2, HEIGHT // 2
+        sc = self._scale()
 
-        # grid lines for depth feel
-        for i in range(1, 4):
-            frac = i / 4.0
-            gx = r.x + int(frac * r.width)
-            gy = r.y + int(frac * r.height)
-            pygame.draw.line(surf, (25, 25, 45), (gx, r.y), (gx, r.bottom), 1)
-            pygame.draw.line(surf, (25, 25, 45), (r.x, gy), (r.right, gy), 1)
+        # ── listener marker ──
+        pygame.draw.circle(surf, (35, 35, 55), (lcx, lcy), 14, 1)
+        pygame.draw.circle(surf, (30, 30, 50), (lcx, lcy), 3)
+        lf = font(9)
+        surf.blit(lf.render("YOU", True, (50, 50, 75)),
+                  (lcx - 10, lcy + 16))
 
-        # distance rings from speaker
-        for ring_r in (30, 65, 100):
-            pygame.draw.circle(surf, (30, 30, 55),
-                               (self.cx, self.cy), ring_r, 1)
+        # ── dashed line from listener to speaker ──
+        dist_px = math.hypot(sx - lcx, sy - lcy)
+        if dist_px > 20:
+            angle = math.atan2(sy - lcy, sx - lcx)
+            dash_len, gap = 8, 6
+            total = dash_len + gap
+            steps = int(dist_px / total)
+            for i in range(steps):
+                t0 = i * total
+                t1 = min(t0 + dash_len, dist_px)
+                x0 = int(lcx + math.cos(angle) * t0)
+                y0 = int(lcy + math.sin(angle) * t0)
+                x1 = int(lcx + math.cos(angle) * t1)
+                y1 = int(lcy + math.sin(angle) * t1)
+                # colour fades with Z depth
+                z_bright = int(40 + max(0, self.sz + 1) * 20)
+                pygame.draw.line(surf, (z_bright, z_bright + 10, z_bright + 30),
+                                 (x0, y0), (x1, y1), 1)
 
-        # trail
-        if len(self.trail) > 2:
-            for i in range(1, len(self.trail)):
-                alpha = int(40 * i / len(self.trail))
-                col = (60, 200, 140, alpha)
-                ts = pygame.Surface((4, 4), pygame.SRCALPHA)
-                pygame.draw.circle(ts, col, (2, 2), 2)
-                surf.blit(ts, (int(self.trail[i][0]) - 2,
-                               int(self.trail[i][1]) - 2))
+        # ── shadow (larger when "above" / close) ──
+        shad_r = int(20 * sc)
+        shad_a = max(10, int(50 * sc))
+        shad_s = pygame.Surface((shad_r * 2, shad_r * 2), pygame.SRCALPHA)
+        pygame.draw.ellipse(shad_s, (0, 0, 0, shad_a),
+                            (0, shad_r // 2, shad_r * 2, shad_r))
+        surf.blit(shad_s, (sx - shad_r, sy + int(28 * sc)))
 
-        # speaker icon  (pulsing circles)
-        pulse_r = int(12 + math.sin(self.pulse) * 4)
-        pygame.draw.circle(surf, (200, 80, 80), (self.cx, self.cy), pulse_r)
-        pygame.draw.circle(surf, (255, 120, 100), (self.cx, self.cy),
-                           pulse_r - 3)
-        # sound waves emanating
-        for i in range(3):
-            wave_r = pulse_r + 8 + i * 12
-            wave_alpha = max(0, 120 - i * 40 - int(math.sin(self.pulse + i) * 30))
-            ws = pygame.Surface((wave_r * 2 + 2, wave_r * 2 + 2), pygame.SRCALPHA)
-            pygame.draw.circle(ws, (255, 100, 80, wave_alpha),
-                               (wave_r + 1, wave_r + 1), wave_r, 2)
-            surf.blit(ws, (self.cx - wave_r - 1, self.cy - wave_r - 1))
+        # ── speaker body (scaled) ──
+        bw = int(42 * sc)
+        bh = int(50 * sc)
+        body_r = pygame.Rect(sx - bw // 2, sy - bh // 2, bw, bh)
 
-        # listener character (little person icon)
-        lx, ly = int(self.lx), int(self.ly)
-        # head
-        head_col = (80, 220, 160) if self.grabbed else (60, 180, 130)
-        pygame.draw.circle(surf, head_col, (lx, ly - 8), 7)
-        # body
-        pygame.draw.line(surf, head_col, (lx, ly - 1), (lx, ly + 10), 2)
-        # arms
-        pygame.draw.line(surf, head_col, (lx - 6, ly + 3), (lx + 6, ly + 3), 2)
-        # legs
-        pygame.draw.line(surf, head_col, (lx, ly + 10), (lx - 5, ly + 18), 2)
-        pygame.draw.line(surf, head_col, (lx, ly + 10), (lx + 5, ly + 18), 2)
-        # ear indicators (L/R)
-        ear_l_col = (100, 100, 255) if self.eng.pan < -0.1 else (60, 60, 90)
-        ear_r_col = (255, 100, 100) if self.eng.pan > 0.1 else (60, 60, 90)
-        pygame.draw.circle(surf, ear_l_col, (lx - 9, ly - 8), 3)
-        pygame.draw.circle(surf, ear_r_col, (lx + 9, ly - 8), 3)
+        # Z-dependent brightness
+        z_val = (self.sz - self.Z_MIN) / (self.Z_MAX - self.Z_MIN)  # 0..1
+        base_bright = int(40 + z_val * 30)
+        body_col = ((base_bright, base_bright, base_bright + 20)
+                    if not self.muted else (70, 30, 30))
+        pygame.draw.rect(surf, body_col, body_r, border_radius=int(6 * sc))
+        edge_b = int(70 + z_val * 50)
+        pygame.draw.rect(surf, (edge_b, edge_b, edge_b + 30),
+                         body_r, 2, border_radius=int(6 * sc))
+
+        # cone
+        cone_r = int((14 + math.sin(self.pulse) * 2) * sc)
+        cone_col = (int(70 + z_val * 30), int(70 + z_val * 30),
+                    int(100 + z_val * 40)) if not self.muted else (100, 50, 50)
+        pygame.draw.circle(surf, cone_col, (sx, sy - int(2 * sc)), cone_r)
+        pygame.draw.circle(surf, (110, 110, 150),
+                           (sx, sy - int(2 * sc)), cone_r, 2)
+        pygame.draw.circle(surf, (60, 60, 85),
+                           (sx, sy - int(2 * sc)), max(2, int(6 * sc)))
+
+        # sound waves
+        if not self.muted:
+            for i in range(3):
+                wr = int((cone_r + 8 + i * 10
+                          + math.sin(self.pulse + i * 0.8) * 3))
+                wa = max(0, int((90 - i * 30) * sc))
+                ws = pygame.Surface((wr * 2 + 2, wr * 2 + 2), pygame.SRCALPHA)
+                pygame.draw.circle(ws, (130, 130, 200, wa),
+                                   (wr + 1, wr + 1), wr, 2)
+                surf.blit(ws, (sx - wr - 1, sy - int(2 * sc) - wr - 1))
 
         # label
-        f = font(13, True)
-        surf.blit(f.render("SPATIAL ROOM", True, (140, 140, 200)),
-                  (r.x + 4, r.y - 18))
-        # info
-        dist_val = min(1.0, math.hypot(self.lx - self.cx, self.ly - self.cy)
-                       / (self.size / 2))
-        f12 = font(11)
-        surf.blit(f12.render(f"Pan {self.eng.pan:+.2f}  Dist {dist_val:.0%}",
-                             True, (100, 100, 140)),
-                  (r.x + 4, r.bottom + 4))
+        f10 = font(max(8, int(10 * sc)), True)
+        surf.blit(f10.render("SPEAKER", True, (100, 100, 140)),
+                  (sx - int(22 * sc), sy - bh // 2 - int(14 * sc)))
+
+        # ── Z depth bar  (vertical, right of speaker) ──
+        bar_x = sx + bw // 2 + 12
+        bar_y = sy - 40
+        bar_h = 80
+        pygame.draw.line(surf, (40, 40, 60), (bar_x, bar_y),
+                         (bar_x, bar_y + bar_h), 2)
+        # marker
+        z_norm = (self.sz - self.Z_MIN) / (self.Z_MAX - self.Z_MIN)
+        mk_y = bar_y + int((1.0 - z_norm) * bar_h)
+        pygame.draw.circle(surf, (120, 180, 255), (bar_x, mk_y), 5)
+        f8 = font(8)
+        surf.blit(f8.render("NEAR", True, (60, 80, 120)), (bar_x + 8, bar_y - 4))
+        surf.blit(f8.render("FAR", True, (60, 80, 120)),
+                  (bar_x + 8, bar_y + bar_h - 4))
+        # Z value label
+        z_lbl = f"Z {self.sz:+.2f}"
+        surf.blit(f8.render(z_lbl, True, (100, 140, 200)), (bar_x - 6, mk_y - 14))
+
+        # ── info text ──
+        dist_3d = min(1.0, math.sqrt(
+            ((sx - lcx) / (WIDTH / 2)) ** 2 +
+            ((sy - lcy) / (HEIGHT / 2)) ** 2 +
+            self.sz ** 2))
+        f9 = font(9)
+        info = f"Pan {self.eng.pan:+.2f}  3D-Dist {dist_3d:.0%}"
+        surf.blit(f9.render(info, True, (80, 80, 110)),
+                  (sx - int(40 * sc), sy + bh // 2 + int(60 * sc)))
+        # scroll hint
+        surf.blit(f8.render("Scroll = depth", True, (55, 55, 80)),
+                  (sx - int(35 * sc), sy + bh // 2 + int(72 * sc)))
+
+        # ── mini buttons (scaled) ──
+        bass_r, mute_r, mono_r = self._btn_rects()
+        for rect, label, active, on_col, off_col in [
+            (bass_r, "B", self.bass_on, (200, 130, 60), (50, 50, 65)),
+            (mute_r, "M", self.muted,   (200, 60, 60),  (50, 50, 65)),
+            (mono_r, "1", self.mono,    (60, 160, 200),  (50, 50, 65)),
+        ]:
+            col = on_col if active else off_col
+            pygame.draw.rect(surf, col, rect, border_radius=4)
+            bord = (255, 200, 120) if active else (80, 80, 100)
+            pygame.draw.rect(surf, bord, rect, 1, border_radius=4)
+            lbl = font(max(8, int(11 * sc)), True).render(
+                label, True, (220, 220, 240))
+            surf.blit(lbl, (rect.x + (rect.width - lbl.get_width()) // 2,
+                            rect.y + (rect.height - lbl.get_height()) // 2))
+
+        f8b = font(max(7, int(8 * sc)))
+        surf.blit(f8b.render("BASS", True, (70, 70, 90)),
+                  (bass_r.x, bass_r.bottom + 2))
+        surf.blit(f8b.render("MUTE", True, (70, 70, 90)),
+                  (mute_r.x, mute_r.bottom + 2))
+        surf.blit(f8b.render("MONO", True, (70, 70, 90)),
+                  (mono_r.x, mono_r.bottom + 2))
 
 
 # ═════════════════════════════════════════════════════════════
@@ -1474,9 +1517,8 @@ def main():
         ParticleCloud(570, 530, engine),
         VolumeThread(1200, 100, 380, engine),
         ReverseVortex(1030, 195, engine),
-        StereoPendulum(370, 440, engine),
         TimeSpiral(890, 530, engine),
-        SpatialRoom(880, 330, 160, engine),
+        DraggableSpeaker(engine),
         SpaceShooter(1060, 500, engine),
         ChaosBurst(engine),          # hidden
         SecretWobble(engine),         # hidden
