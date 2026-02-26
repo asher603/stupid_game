@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Audio Playground</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- Upload overlay -->
+  <div id="upload-overlay">
+    <div id="upload-area">
+      <div class="upload-icon">♫</div>
+      <h1>Audio Playground</h1>
+      <p>Interactive Audio Effects Toy</p>
+      <p class="upload-hint">Drop an audio file here or click to browse</p>
+      <button id="file-btn">Choose Audio File</button>
+      <input type="file" id="file-input" accept="audio/*" hidden>
+      <p class="upload-formats">MP3 · WAV · OGG · FLAC · M4A</p>
+    </div>
+  </div>
+
+  <!-- Main canvas -->
+  <canvas id="canvas"></canvas>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

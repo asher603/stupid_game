@@ -1,0 +1,6 @@
+{
+  "name": "audio-playground",
+  "version": "1.0.0",
+  "description": "Interactive Audio Effects Playground – drag, click & play with sound",
+  "private": true
+}

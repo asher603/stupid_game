@@ -1,11 +1,12 @@
 # ===========================
-# Python .gitignore
+# Python
 # ===========================
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyc
 
 # C extensions
 *.so
@@ -65,7 +66,39 @@ ENV/
 env.bak/
 venv.bak/
 
+# pyenv
+.python-version
+
+# mypy
+.mypy_cache/
+dmypy.json
+dmypy.txt
+
+# ===========================
+# Node / JavaScript
+# ===========================
+
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# ===========================
+# Vercel
+# ===========================
+
+.vercel/
+.output/
+
+# ===========================
 # IDE / Editor settings
+# ===========================
+
 .vscode/
 .idea/
 *.swp
@@ -77,7 +110,10 @@ venv.bak/
 *.sublime-project
 *.sublime-workspace
 
+# ===========================
 # OS generated files
+# ===========================
+
 Thumbs.db
 ehthumbs.db
 Desktop.ini
@@ -88,26 +124,29 @@ Desktop.ini
 .Trashes
 Icon?
 
-# Jupyter Notebook
-.ipynb_checkpoints
+# ===========================
+# Environment / secrets
+# ===========================
 
-# pyenv
-.python-version
-
-# Environments
 *.env
 .env.local
 .env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
 
-# mypy
-.mypy_cache/
-dmypy.json
-dmypy.txt
+# ===========================
+# Jupyter Notebook
+# ===========================
 
-# Pygame specific
-*.pyc
+.ipynb_checkpoints
 
-# Game specific
+# ===========================
+# Misc
+# ===========================
+
 saves/
 logs/
 *.log
+*.tmp
+*.bak

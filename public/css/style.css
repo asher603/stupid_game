@@ -1,0 +1,120 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: #0c0c16;
+  overflow: hidden;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  font-family: Consolas, "Courier New", monospace;
+  color: #ccc;
+}
+
+canvas {
+  display: block;
+  background: #0c0c16;
+}
+
+/* ── Upload Overlay ── */
+
+#upload-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: #0c0c16;
+  transition: opacity 0.5s ease;
+}
+
+#upload-overlay.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+#upload-area {
+  text-align: center;
+  padding: 60px 80px;
+  border: 2px dashed #2a2a45;
+  border-radius: 20px;
+  background: #10101e;
+  transition: border-color 0.3s, background 0.3s;
+  max-width: 500px;
+}
+
+#upload-area.dragover {
+  border-color: #6e8efb;
+  background: #14142a;
+}
+
+.upload-icon {
+  font-size: 64px;
+  margin-bottom: 16px;
+  opacity: 0.6;
+}
+
+#upload-area h1 {
+  font-size: 28px;
+  font-weight: bold;
+  color: #b0b8e8;
+  margin-bottom: 8px;
+}
+
+#upload-area p {
+  color: #6a6a8a;
+  margin-bottom: 6px;
+  font-size: 14px;
+}
+
+.upload-hint {
+  margin-top: 20px !important;
+  margin-bottom: 16px !important;
+}
+
+.upload-formats {
+  margin-top: 12px !important;
+  font-size: 12px !important;
+  color: #44445a !important;
+}
+
+#file-btn {
+  padding: 12px 32px;
+  font-family: inherit;
+  font-size: 15px;
+  color: #d0d0f0;
+  background: linear-gradient(135deg, #2a2a50, #3a3a65);
+  border: 1px solid #4a4a75;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+#file-btn:hover {
+  background: linear-gradient(135deg, #3a3a65, #4a4a80);
+  border-color: #6a6aaa;
+  transform: translateY(-1px);
+}
+
+#file-btn:active {
+  transform: translateY(0);
+}
+
+/* ── Loading indicator ── */
+
+.loading-text {
+  color: #6e8efb;
+  font-size: 16px;
+  margin-top: 16px;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
