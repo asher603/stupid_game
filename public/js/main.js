@@ -1,257 +1,462 @@
-// ═══════════════════════════════════════════════
-//  Main – ties everything together
-// ═══════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+//  DJ Studio Pro – Main Controller
+//  Wires up UI, events, visualisation, and audio engine
+// ═══════════════════════════════════════════════════════════
 
-import { WIDTH, HEIGHT, rgb, drawLines, drawText, fillRect, strokeRect } from './utils.js';
-import { AudioEngine } from './audio-engine.js';
-import {
-  ElasticString, GravityOrb, RipplePond, ParticleCloud,
-  VolumeThread, ReverseVortex, TimeSpiral, DraggableSpeaker,
-  SpaceShooter, ChaosBurst, SecretWobble,
-} from './objects.js';
+import { DJMixer } from './audio-engine.js';
+import { formatTime, drawWaveformOverview, drawVUMeter, drawSpectrum, drawMasterSpectrum } from './utils.js';
 
-// ── State ──
-let canvas, ctx;
-let engine = null;
-let objects = [];
-let mouseX = 0, mouseY = 0;
-let lastTime = 0;
-
-// Seek bar rect (matches Python layout)
-const seekBar = { x: 30, y: HEIGHT - 60, w: WIDTH - 60, h: 45 };
+// ── Global state ──
+let mixer = null;
+const decks = {};  // { A: { engine, els, ... }, B: { ... } }
+let rafId = null;
 
 // ═══════════════════════════════════════════════
-//  Initialisation & file loading
+//  Initialisation
 // ═══════════════════════════════════════════════
 
 function init() {
-  canvas = document.getElementById('canvas');
-  canvas.width = WIDTH;
-  canvas.height = HEIGHT;
-  ctx = canvas.getContext('2d');
+  mixer = new DJMixer();
 
-  resizeCanvas();
-  window.addEventListener('resize', resizeCanvas);
+  // Set up both decks
+  for (const id of ['A', 'B']) {
+    const section = document.getElementById(`deck-${id.toLowerCase()}`);
+    decks[id] = {
+      engine: id === 'A' ? mixer.deckA : mixer.deckB,
+      section,
+      els: collectDeckElements(section),
+      fxActive: { echo: false, reverb: false, distortion: false },
+    };
+    bindDeckEvents(id);
+  }
 
-  // File-upload wiring
-  const overlay  = document.getElementById('upload-overlay');
-  const area     = document.getElementById('upload-area');
-  const fileBtn  = document.getElementById('file-btn');
-  const fileInput = document.getElementById('file-input');
+  // Center / global controls
+  bindGlobalEvents();
+  startClock();
 
-  fileBtn.addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', () => { if (fileInput.files[0]) loadFile(fileInput.files[0]); });
+  // Start render loop
+  rafId = requestAnimationFrame(loop);
+}
 
-  // Drag-and-drop
-  area.addEventListener('dragover', e => { e.preventDefault(); area.classList.add('dragover'); });
-  area.addEventListener('dragleave', () => area.classList.remove('dragover'));
-  area.addEventListener('drop', e => {
+function collectDeckElements(section) {
+  const q = (sel) => section.querySelector(sel);
+  const qa = (sel) => section.querySelectorAll(sel);
+  return {
+    trackName: q('[data-el="trackName"]'),
+    bpm: q('[data-el="bpm"]'),
+    waveform: q('[data-el="waveform"]'),
+    timeDisplay: q('[data-el="timeDisplay"]'),
+    dropZone: q('[data-el="dropZone"]'),
+    fileInput: q('[data-el="fileInput"]'),
+    tempoSlider: q('[data-el="tempoSlider"]'),
+    tempoDisplay: q('[data-el="tempoDisplay"]'),
+    eqHighVal: q('[data-el="eqHighVal"]'),
+    eqMidVal: q('[data-el="eqMidVal"]'),
+    eqLowVal: q('[data-el="eqLowVal"]'),
+    filterVal: q('[data-el="filterVal"]'),
+    vuMeter: q('[data-el="vuMeter"]'),
+    volDisplay: q('[data-el="volDisplay"]'),
+    btnPlay: q('[data-action="play"]'),
+    btnCue: q('[data-action="cue"]'),
+    btnSync: q('[data-action="sync"]'),
+    btnLoop: q('[data-action="loop"]'),
+    knobs: qa('.knob'),
+    fxButtons: qa('.btn-fx'),
+    fxAmounts: qa('.fx-amount'),
+    volumeFader: q('.volume-fader'),
+  };
+}
+
+// ═══════════════════════════════════════════════
+//  Deck Events
+// ═══════════════════════════════════════════════
+
+function bindDeckEvents(id) {
+  const deck = decks[id];
+  const { els, engine } = deck;
+
+  // ── File loading ──
+  els.dropZone.addEventListener('click', () => els.fileInput.click());
+  els.fileInput.addEventListener('change', () => {
+    if (els.fileInput.files[0]) loadFileToDeck(id, els.fileInput.files[0]);
+  });
+  els.dropZone.addEventListener('dragover', e => {
     e.preventDefault();
-    area.classList.remove('dragover');
-    if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+    els.dropZone.classList.add('dragover');
+  });
+  els.dropZone.addEventListener('dragleave', () => {
+    els.dropZone.classList.remove('dragover');
+  });
+  els.dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    els.dropZone.classList.remove('dragover');
+    if (e.dataTransfer.files[0]) loadFileToDeck(id, e.dataTransfer.files[0]);
   });
 
-  // Start render loop (draws dark bg until audio is loaded)
-  requestAnimationFrame(loop);
+  // ── Transport buttons ──
+  els.btnPlay.addEventListener('click', () => {
+    engine.togglePlay();
+    updatePlayButton(id);
+  });
+
+  els.btnCue.addEventListener('click', e => {
+    if (e.shiftKey) {
+      engine.setCuePoint();
+    } else {
+      engine.goToCue();
+    }
+  });
+
+  els.btnSync.addEventListener('click', () => {
+    syncBPM(id);
+  });
+
+  els.btnLoop.addEventListener('click', () => {
+    engine.toggleLoop();
+    els.btnLoop.classList.toggle('active', engine.looping);
+  });
+
+  // ── Tempo slider ──
+  els.tempoSlider.addEventListener('input', () => {
+    const val = parseFloat(els.tempoSlider.value);
+    engine.tempo = val;
+    els.tempoDisplay.textContent = `${val >= 0 ? '+' : ''}${val.toFixed(1)}%`;
+  });
+
+  // Double-click to reset tempo
+  els.tempoSlider.addEventListener('dblclick', () => {
+    els.tempoSlider.value = 0;
+    engine.tempo = 0;
+    els.tempoDisplay.textContent = '0.0%';
+  });
+
+  // ── EQ knobs ──
+  els.knobs.forEach(knob => {
+    const param = knob.dataset.param;
+    knob.addEventListener('input', () => {
+      const val = parseFloat(knob.value);
+      switch (param) {
+        case 'eqHigh':
+          engine.eqHighDb = val;
+          els.eqHighVal.textContent = `${val > 0 ? '+' : ''}${val.toFixed(0)} dB`;
+          break;
+        case 'eqMid':
+          engine.eqMidDb = val;
+          els.eqMidVal.textContent = `${val > 0 ? '+' : ''}${val.toFixed(0)} dB`;
+          break;
+        case 'eqLow':
+          engine.eqLowDb = val;
+          els.eqLowVal.textContent = `${val > 0 ? '+' : ''}${val.toFixed(0)} dB`;
+          break;
+        case 'filter':
+          engine.filterPos = val;
+          if (val < 48) els.filterVal.textContent = `LP ${Math.round((48 - val) / 48 * 100)}%`;
+          else if (val > 52) els.filterVal.textContent = `HP ${Math.round((val - 52) / 48 * 100)}%`;
+          else els.filterVal.textContent = 'OFF';
+          break;
+      }
+    });
+
+    // Double-click to reset
+    knob.addEventListener('dblclick', () => {
+      switch (param) {
+        case 'eqHigh': knob.value = 0; engine.eqHighDb = 0; els.eqHighVal.textContent = '0 dB'; break;
+        case 'eqMid': knob.value = 0; engine.eqMidDb = 0; els.eqMidVal.textContent = '0 dB'; break;
+        case 'eqLow': knob.value = 0; engine.eqLowDb = 0; els.eqLowVal.textContent = '0 dB'; break;
+        case 'filter': knob.value = 50; engine.filterPos = 50; els.filterVal.textContent = 'OFF'; break;
+      }
+    });
+  });
+
+  // ── FX buttons & amounts ──
+  els.fxButtons.forEach(btn => {
+    const fx = btn.dataset.fx;
+    btn.addEventListener('click', () => {
+      deck.fxActive[fx] = !deck.fxActive[fx];
+      btn.classList.toggle('active', deck.fxActive[fx]);
+      if (!deck.fxActive[fx]) {
+        // Reset effect amount
+        switch (fx) {
+          case 'echo': engine.echoAmount = 0; break;
+          case 'reverb': engine.reverbAmount = 0; break;
+          case 'distortion': engine.distAmount = 0; break;
+        }
+        // Reset slider
+        const slot = btn.closest('.fx-slot');
+        const slider = slot.querySelector('.fx-amount');
+        if (slider) slider.value = 0;
+      }
+    });
+  });
+
+  els.fxAmounts.forEach(slider => {
+    const param = slider.dataset.param;
+    slider.addEventListener('input', () => {
+      const val = parseFloat(slider.value);
+      switch (param) {
+        case 'echoAmount':
+          if (deck.fxActive.echo) engine.echoAmount = val;
+          break;
+        case 'reverbAmount':
+          if (deck.fxActive.reverb) engine.reverbAmount = val;
+          break;
+        case 'distAmount':
+          if (deck.fxActive.distortion) engine.distAmount = val;
+          break;
+      }
+    });
+  });
+
+  // ── Volume fader ──
+  els.volumeFader.addEventListener('input', () => {
+    const val = parseFloat(els.volumeFader.value) / 100;
+    engine.volume = val;
+    els.volDisplay.textContent = `${Math.round(val * 100)}%`;
+  });
+
+  // ── Waveform click to seek ──
+  const waveformSeek = (e) => {
+    if (!engine.loaded) return;
+    const rect = els.waveform.getBoundingClientRect();
+    const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    engine.seek(frac);
+  };
+
+  let waveformDragging = false;
+  els.waveform.addEventListener('mousedown', e => {
+    waveformDragging = true;
+    waveformSeek(e);
+  });
+  document.addEventListener('mousemove', e => {
+    if (waveformDragging) waveformSeek(e);
+  });
+  document.addEventListener('mouseup', () => {
+    waveformDragging = false;
+  });
 }
 
-function resizeCanvas() {
-  const scale = Math.min(window.innerWidth / WIDTH, window.innerHeight / HEIGHT);
-  canvas.style.width  = (WIDTH * scale) + 'px';
-  canvas.style.height = (HEIGHT * scale) + 'px';
+// ═══════════════════════════════════════════════
+//  Global Events
+// ═══════════════════════════════════════════════
+
+function bindGlobalEvents() {
+  // Crossfader
+  const crossfader = document.getElementById('crossfader');
+  crossfader.addEventListener('input', () => {
+    mixer.crossfader = parseFloat(crossfader.value);
+  });
+  crossfader.addEventListener('dblclick', () => {
+    crossfader.value = 0;
+    mixer.crossfader = 0;
+  });
+
+  // Master volume
+  const masterVol = document.getElementById('master-volume');
+  const masterDisplay = document.getElementById('master-vol-display');
+  masterVol.addEventListener('input', () => {
+    const val = parseFloat(masterVol.value) / 100;
+    mixer.masterVolume = val;
+    masterDisplay.textContent = `${Math.round(val * 100)}%`;
+  });
+
+  // Hot cues
+  document.querySelectorAll('.hot-cue-row').forEach(row => {
+    const deckId = row.dataset.deck;
+    row.querySelectorAll('.btn-hotcue').forEach(btn => {
+      const cueIdx = parseInt(btn.dataset.cue) - 1;
+      btn.addEventListener('click', () => {
+        const engine = deckId === 'A' ? mixer.deckA : mixer.deckB;
+        if (!engine.loaded) return;
+        engine.setHotCue(cueIdx);
+        if (engine.hotCues[cueIdx] !== null) {
+          btn.classList.add('set');
+        }
+      });
+      // Right-click to clear
+      btn.addEventListener('contextmenu', e => {
+        e.preventDefault();
+        const engine = deckId === 'A' ? mixer.deckA : mixer.deckB;
+        engine.hotCues[cueIdx] = null;
+        btn.classList.remove('set');
+      });
+    });
+  });
+
+  // Keyboard shortcuts
+  document.addEventListener('keydown', e => {
+    // Prevent browser default for Space
+    if (e.code === 'Space') {
+      e.preventDefault();
+      if (e.shiftKey) {
+        mixer.deckB.togglePlay();
+        updatePlayButton('B');
+      } else {
+        mixer.deckA.togglePlay();
+        updatePlayButton('A');
+      }
+      return;
+    }
+
+    switch (e.key.toLowerCase()) {
+      case 'q': mixer.deckA.goToCue(); break;
+      case 'w': mixer.deckB.goToCue(); break;
+      case '1': if (mixer.deckA.loaded) hotCueKey('A', 0); break;
+      case '2': if (mixer.deckA.loaded) hotCueKey('A', 1); break;
+      case '3': if (mixer.deckA.loaded) hotCueKey('A', 2); break;
+      case '4': if (mixer.deckA.loaded) hotCueKey('A', 3); break;
+      case '5': if (mixer.deckB.loaded) hotCueKey('B', 0); break;
+      case '6': if (mixer.deckB.loaded) hotCueKey('B', 1); break;
+      case '7': if (mixer.deckB.loaded) hotCueKey('B', 2); break;
+      case '8': if (mixer.deckB.loaded) hotCueKey('B', 3); break;
+    }
+  });
 }
 
-function getCanvasCoords(e) {
-  const rect = canvas.getBoundingClientRect();
-  return [
-    (e.clientX - rect.left) * (WIDTH / rect.width),
-    (e.clientY - rect.top)  * (HEIGHT / rect.height),
-  ];
+function hotCueKey(deckId, idx) {
+  const engine = deckId === 'A' ? mixer.deckA : mixer.deckB;
+  engine.setHotCue(idx);
+  // Update button state
+  const row = document.querySelector(`.hot-cue-row[data-deck="${deckId}"]`);
+  const btn = row.querySelectorAll('.btn-hotcue')[idx];
+  if (engine.hotCues[idx] !== null) btn.classList.add('set');
 }
 
-// ── Load audio file ──
+function syncBPM(deckId) {
+  const other = deckId === 'A' ? 'B' : 'A';
+  const thisDeck = decks[deckId].engine;
+  const otherDeck = decks[other].engine;
 
-async function loadFile(file) {
-  const overlay = document.getElementById('upload-overlay');
-  const area    = document.getElementById('upload-area');
+  if (!otherDeck.loaded || !thisDeck.loaded) return;
+  if (otherDeck.bpm === 0) return;
 
-  // Show loading state
-  area.innerHTML = '<div class="upload-icon">♫</div><h1>Audio Playground</h1><p class="loading-text">Loading audio…</p>';
+  // Calculate needed tempo adjustment
+  const ratio = otherDeck.bpm / thisDeck.bpm;
+  const tempoChange = (ratio - 1) * 100;
+  thisDeck.tempo = Math.max(-50, Math.min(50, tempoChange));
+
+  // Update slider
+  decks[deckId].els.tempoSlider.value = thisDeck.tempo;
+  decks[deckId].els.tempoDisplay.textContent = `${thisDeck.tempo >= 0 ? '+' : ''}${thisDeck.tempo.toFixed(1)}%`;
+}
+
+// ═══════════════════════════════════════════════
+//  File Loading
+// ═══════════════════════════════════════════════
+
+async function loadFileToDeck(deckId, file) {
+  const deck = decks[deckId];
+  const { els } = deck;
+
+  els.dropZone.querySelector('span').textContent = 'Loading...';
 
   try {
-    const audioCtx = new AudioContext();
-    const arrayBuf = await file.arrayBuffer();
-    const audioBuf = await audioCtx.decodeAudioData(arrayBuf);
+    await mixer.loadToDeck(deckId, file);
+    els.dropZone.classList.add('hidden');
+    els.trackName.textContent = file.name.replace(/\.[^.]+$/, '');
+    els.bpm.textContent = `${deck.engine.bpm} BPM`;
 
-    engine = new AudioEngine(audioCtx, audioBuf);
-    engine.filename = file.name;
+    // Register track-end callback to auto-update play button
+    deck.engine.onTrackEnd = () => updatePlayButton(deckId);
 
-    // Create objects (same layout as the Python version)
-    objects = [
-      new ElasticString(60, 150, 470, engine),
-      new GravityOrb([570, 70, 290, 240], engine),
-      new RipplePond(170, 510, 115, engine),
-      new ParticleCloud(570, 530, engine),
-      new VolumeThread(1200, 100, 380, engine),
-      new ReverseVortex(1030, 195, engine),
-      new TimeSpiral(890, 530, engine),
-      new DraggableSpeaker(engine),
-      new SpaceShooter(1060, 500, engine),
-      new ChaosBurst(engine),
-      new SecretWobble(engine),
-    ];
-
-    // Wire up canvas events
-    bindCanvasEvents();
-
-    // Hide overlay & start playback
-    overlay.classList.add('hidden');
-    engine.start();
-
+    updatePlayButton(deckId);
   } catch (err) {
-    area.innerHTML = `<div class="upload-icon">⚠</div><h1>Error</h1><p style="color:#f66">${err.message}</p><p style="margin-top:12px"><button id="file-btn" onclick="location.reload()">Try again</button></p>`;
-    console.error(err);
+    els.dropZone.querySelector('span').textContent = `Error: ${err.message}. Click to retry.`;
+    console.error(`Deck ${deckId} load error:`, err);
   }
 }
 
 // ═══════════════════════════════════════════════
-//  Event handling
+//  UI Updates
 // ═══════════════════════════════════════════════
 
-function bindCanvasEvents() {
-  canvas.addEventListener('mousedown', e => {
-    e.preventDefault();
-    [mouseX, mouseY] = getCanvasCoords(e);
-    dispatch('mousedown', mouseX, mouseY, e);
-  });
-
-  canvas.addEventListener('mousemove', e => {
-    [mouseX, mouseY] = getCanvasCoords(e);
-  });
-
-  // Global mouseup (catches releases outside canvas)
-  document.addEventListener('mouseup', e => {
-    [mouseX, mouseY] = getCanvasCoords(e);
-    dispatch('mouseup', mouseX, mouseY, e);
-  });
-
-  canvas.addEventListener('wheel', e => {
-    e.preventDefault();
-    [mouseX, mouseY] = getCanvasCoords(e);
-    dispatch('wheel', mouseX, mouseY, e);
-  }, { passive: false });
-
-  // Prevent context menu for right-click chaos trigger
-  canvas.addEventListener('contextmenu', e => e.preventDefault());
-
-  document.addEventListener('keydown', e => dispatch('keydown', mouseX, mouseY, e));
-  document.addEventListener('keyup',   e => dispatch('keyup',   mouseX, mouseY, e));
+function updatePlayButton(deckId) {
+  const deck = decks[deckId];
+  const { engine, els, section } = deck;
+  els.btnPlay.textContent = engine.playing ? '❚❚' : '▶';
+  els.btnPlay.classList.toggle('active', engine.playing);
+  section.classList.toggle('playing', engine.playing);
 }
 
-function dispatch(type, mx, my, ev) {
-  if (!engine) return;
-
-  // Click-to-seek on waveform bar
-  if (type === 'mousedown' && ev.button === 0 &&
-      mx >= seekBar.x && mx <= seekBar.x + seekBar.w &&
-      my >= seekBar.y && my <= seekBar.y + seekBar.h) {
-    const frac = (mx - seekBar.x) / seekBar.w;
-    engine.seek(frac);
-    return;
-  }
-
-  // Dispatch to objects (first to consume wins)
-  for (const obj of objects) {
-    if (obj.handle(type, mx, my, ev)) {
-      if (type !== 'keyup') return;   // keyup passes through
-    }
-  }
-
-  // Global hotkeys
-  if (type === 'keydown') {
-    if (ev.code === 'Space')    { engine.togglePlay(); ev.preventDefault(); }
-    else if (ev.key.toLowerCase() === 'r') { for (const o of objects) o.reset(); }
-  }
+function startClock() {
+  const clockEl = document.getElementById('clock');
+  const tick = () => {
+    const now = new Date();
+    clockEl.textContent = now.toLocaleTimeString('en-US', { hour12: false });
+  };
+  tick();
+  setInterval(tick, 1000);
 }
 
 // ═══════════════════════════════════════════════
-//  Game loop
+//  Render Loop
 // ═══════════════════════════════════════════════
 
-function loop(time) {
-  requestAnimationFrame(loop);
-  if (!engine) return;
+function loop() {
+  rafId = requestAnimationFrame(loop);
+  if (!mixer) return;
 
-  const dt = Math.min((time - lastTime) / 1000, 0.05);
-  lastTime = time;
+  mixer.update();
 
-  // Update objects
-  for (const obj of objects) obj.update(mouseX, mouseY, dt);
+  for (const id of ['A', 'B']) {
+    const deck = decks[id];
+    const { engine, els } = deck;
+    if (!engine.loaded) continue;
 
-  // Sync audio params
-  engine.applyParams();
+    // Auto-sync play button state (catches natural track end)
+    const isPlaying = engine.playing;
+    const btnShows = els.btnPlay.classList.contains('active');
+    if (isPlaying !== btnShows) updatePlayButton(id);
 
-  // Draw
-  draw(dt);
-}
+    // Update time display
+    const pos = engine.position;
+    const dur = engine.duration;
+    els.timeDisplay.textContent = `${formatTime(pos)} / ${formatTime(dur)}`;
 
-// ═══════════════════════════════════════════════
-//  Rendering
-// ═══════════════════════════════════════════════
+    // Sync canvas resolution to display size for crisp rendering
+    syncCanvasSize(els.waveform);
+    syncCanvasSize(els.vuMeter);
 
-function draw(dt) {
-  const c = ctx;
-  c.fillStyle = rgb(12, 12, 22);
-  c.fillRect(0, 0, WIDTH, HEIGHT);
+    // Draw waveform
+    const wCtx = els.waveform.getContext('2d');
+    const accent = id === 'A' ? '#00d4ff' : '#ff4488';
+    const accentDim = id === 'A' ? '#004466' : '#661133';
+    drawWaveformOverview(
+      wCtx, els.waveform, engine.waveformOverview, engine.progress,
+      accent, accentDim,
+      engine.cuePoint / engine.duration,
+      engine.hotCues.map(c => c !== null ? c / engine.duration : null),
+      engine.looping ? engine.loopStart / engine.duration : null,
+      engine.looping ? engine.loopEnd / engine.duration : null
+    );
 
-  // Draw all objects
-  for (const obj of objects) {
-    if (obj.draw.length >= 3) obj.draw(c, mouseX, mouseY);   // SecretWobble wants mx/my
-    else obj.draw(c);
+    // Draw VU meter
+    const vuCtx = els.vuMeter.getContext('2d');
+    drawVUMeter(vuCtx, els.vuMeter, engine.getLevel());
   }
 
-  // Waveform / seek bar
-  drawWaveform(c);
+  // Master spectrum
+  const specCanvas = document.getElementById('spectrum-canvas');
+  syncCanvasSize(specCanvas);
+  const specCtx = specCanvas.getContext('2d');
+  drawSpectrum(specCtx, specCanvas, mixer.getMasterFrequencyData());
 
-  // HUD
-  drawHUD(c);
+  // Top bar mini spectrum
+  const miniCanvas = document.getElementById('master-spectrum');
+  syncCanvasSize(miniCanvas);
+  const miniCtx = miniCanvas.getContext('2d');
+  drawMasterSpectrum(miniCtx, miniCanvas, mixer.getMasterFrequencyData());
 }
 
-function drawWaveform(c) {
-  const data = engine.getWaveform();
-  const { x, y, w, h } = seekBar;
-
-  strokeRect(c, x, y, w, h, rgb(40, 40, 55), 1, 4);
-
-  // Waveform line
-  const step = Math.max(1, (data.length / w) | 0);
-  const pts = [];
-  for (let i = 0; i < data.length - step; i += step) {
-    const px = x + (i / data.length) * w;
-    const py = y + h / 2 - data[i] * (h / 2);
-    pts.push([px, py]);
+/** Sync canvas internal resolution to its CSS display size */
+function syncCanvasSize(canvas) {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  const displayW = Math.round(rect.width * dpr);
+  const displayH = Math.round(rect.height * dpr);
+  if (displayW > 0 && displayH > 0 && (canvas.width !== displayW || canvas.height !== displayH)) {
+    canvas.width = displayW;
+    canvas.height = displayH;
   }
-  if (pts.length > 1) drawLines(c, pts, rgb(60, 180, 120), 1);
-
-  // Progress bar
-  const pw = engine.progress * w;
-  fillRect(c, x, y + h - 4, pw, 4, rgb(35, 85, 60));
-}
-
-function drawHUD(c) {
-  const tSec = engine.displayPosition;
-  const dur  = engine.duration;
-  const sym  = engine.playing ? '▶' : '❚❚';
-  const rev  = engine.reverse ? ' ◀◀' : '';
-  const mm1 = String(tSec / 60 | 0).padStart(2, '0');
-  const ss1 = String(tSec % 60 | 0).padStart(2, '0');
-  const mm2 = String(dur / 60 | 0).padStart(2, '0');
-  const ss2 = String(dur % 60 | 0).padStart(2, '0');
-  const title = `${sym}${rev}  ${engine.filename}    ${mm1}:${ss1} / ${mm2}:${ss2}`;
-  drawText(c, title, 30, HEIGHT - 78, rgb(180, 180, 200), 16, true);
-
-  const hint = 'SPACE play/pause   R reset   |   Click waveform to seek   |   Interact with everything!';
-  drawText(c, hint, 30, 12, rgb(80, 80, 100), 13);
 }
 
 // ── Bootstrap ──

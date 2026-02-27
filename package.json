@@ -1,6 +1,6 @@
 {
-  "name": "audio-playground",
+  "name": "dj-studio-pro",
   "version": "1.0.0",
-  "description": "Interactive Audio Effects Playground – drag, click & play with sound",
+  "description": "Professional DJ Studio – dual-deck mixing with EQ, effects, crossfader & spectrum analyser",
   "private": true
 }

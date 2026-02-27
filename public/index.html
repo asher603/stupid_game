@@ -3,26 +3,244 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Audio Playground</title>
+  <title>Patrick Box</title>
   <link rel="stylesheet" href="css/style.css">
   <link rel="icon" type="image/png" href="patrick.png">
 </head>
 <body>
-  <!-- Upload overlay -->
-  <div id="upload-overlay">
-    <div id="upload-area">
-      <div class="upload-icon">♫</div>
-      <h1>Audio Playground</h1>
-      <p>Interactive Audio Effects Toy</p>
-      <p class="upload-hint">Drop an audio file here or click to browse</p>
-      <button id="file-btn">Choose Audio File</button>
-      <input type="file" id="file-input" accept="audio/*" hidden>
-      <p class="upload-formats">MP3 · WAV · OGG · FLAC · M4A</p>
-    </div>
-  </div>
 
-  <!-- Main canvas -->
-  <canvas id="canvas"></canvas>
+  <!-- ═══ Header ═══ -->
+  <header id="top-bar">
+    <div class="logo">
+      <img src="patrick.png" alt="Patrick" class="logo-icon-img">
+      <span class="logo-text">Patrick <span class="accent">Box</span></span>
+    </div>
+    <div id="master-section">
+      <div class="master-vu">
+        <canvas id="master-spectrum" width="200" height="32"></canvas>
+      </div>
+      <div class="master-vol">
+        <label>MASTER</label>
+        <input type="range" id="master-volume" min="0" max="100" value="80" class="vertical-slider">
+        <span id="master-vol-display">80%</span>
+      </div>
+    </div>
+    <div class="top-right">
+      <span id="clock"></span>
+    </div>
+  </header>
+
+  <!-- ═══ Main DJ Area ═══ -->
+  <main id="dj-console">
+
+    <!-- ──── Deck A ──── -->
+    <section class="deck" id="deck-a" data-deck="A">
+      <div class="deck-header">
+        <span class="deck-label">DECK A</span>
+        <span class="deck-track-name" data-el="trackName">No Track Loaded</span>
+        <span class="deck-bpm" data-el="bpm">--- BPM</span>
+      </div>
+
+      <!-- Waveform -->
+      <div class="waveform-container">
+        <canvas class="waveform-canvas" data-el="waveform" width="560" height="80"></canvas>
+        <div class="waveform-overlay">
+          <span class="time-display" data-el="timeDisplay">0:00 / 0:00</span>
+        </div>
+        <div class="drop-zone" data-el="dropZone">
+          <span>Drop audio file or click to load</span>
+          <input type="file" accept="audio/*" data-el="fileInput" hidden>
+        </div>
+      </div>
+
+      <!-- Transport Controls -->
+      <div class="transport">
+        <button class="btn btn-cue" data-action="cue" title="Cue (C)">CUE</button>
+        <button class="btn btn-play" data-action="play" title="Play/Pause (Space)">▶</button>
+        <button class="btn btn-sync" data-action="sync" title="Sync BPM">SYNC</button>
+        <button class="btn btn-loop" data-action="loop" title="Loop 4 bars">LOOP</button>
+      </div>
+
+      <!-- Tempo -->
+      <div class="tempo-section">
+        <label>TEMPO</label>
+        <input type="range" class="tempo-slider" data-el="tempoSlider" min="-50" max="50" value="0" step="0.1">
+        <span class="tempo-display" data-el="tempoDisplay">0.0%</span>
+      </div>
+
+      <!-- EQ + Filter -->
+      <div class="eq-section">
+        <div class="knob-group">
+          <label>HI</label>
+          <input type="range" class="knob" data-param="eqHigh" min="-24" max="6" value="0" step="0.5">
+          <span class="knob-value" data-el="eqHighVal">0 dB</span>
+        </div>
+        <div class="knob-group">
+          <label>MID</label>
+          <input type="range" class="knob" data-param="eqMid" min="-24" max="6" value="0" step="0.5">
+          <span class="knob-value" data-el="eqMidVal">0 dB</span>
+        </div>
+        <div class="knob-group">
+          <label>LOW</label>
+          <input type="range" class="knob" data-param="eqLow" min="-24" max="6" value="0" step="0.5">
+          <span class="knob-value" data-el="eqLowVal">0 dB</span>
+        </div>
+        <div class="knob-group">
+          <label>FILTER</label>
+          <input type="range" class="knob" data-param="filter" min="0" max="100" value="50">
+          <span class="knob-value" data-el="filterVal">OFF</span>
+        </div>
+      </div>
+
+      <!-- Effects -->
+      <div class="fx-section">
+        <div class="fx-slot">
+          <button class="btn btn-fx" data-fx="echo">ECHO</button>
+          <input type="range" class="fx-amount" data-param="echoAmount" min="0" max="100" value="0">
+        </div>
+        <div class="fx-slot">
+          <button class="btn btn-fx" data-fx="reverb">REVERB</button>
+          <input type="range" class="fx-amount" data-param="reverbAmount" min="0" max="100" value="0">
+        </div>
+        <div class="fx-slot">
+          <button class="btn btn-fx" data-fx="distortion">DIST</button>
+          <input type="range" class="fx-amount" data-param="distAmount" min="0" max="100" value="0">
+        </div>
+      </div>
+
+      <!-- Channel Volume -->
+      <div class="channel-vol">
+        <div class="vu-meter">
+          <canvas class="vu-canvas" data-el="vuMeter" width="20" height="120"></canvas>
+        </div>
+        <input type="range" class="volume-fader" data-param="volume" min="0" max="100" value="80" orient="vertical">
+        <span class="vol-display" data-el="volDisplay">80%</span>
+      </div>
+    </section>
+
+    <!-- ──── Center / Crossfader ──── -->
+    <section id="center-section">
+      <div id="crossfader-section">
+        <label>CROSSFADER</label>
+        <input type="range" id="crossfader" min="-100" max="100" value="0" step="1">
+        <div class="cf-labels"><span>A</span><span>B</span></div>
+      </div>
+
+      <div id="hot-cue-section">
+        <h3>HOT CUES</h3>
+        <div class="hot-cue-row" data-deck="A">
+          <span class="hc-label">A:</span>
+          <button class="btn btn-hotcue" data-cue="1">1</button>
+          <button class="btn btn-hotcue" data-cue="2">2</button>
+          <button class="btn btn-hotcue" data-cue="3">3</button>
+          <button class="btn btn-hotcue" data-cue="4">4</button>
+        </div>
+        <div class="hot-cue-row" data-deck="B">
+          <span class="hc-label">B:</span>
+          <button class="btn btn-hotcue" data-cue="1">1</button>
+          <button class="btn btn-hotcue" data-cue="2">2</button>
+          <button class="btn btn-hotcue" data-cue="3">3</button>
+          <button class="btn btn-hotcue" data-cue="4">4</button>
+        </div>
+      </div>
+
+      <!-- Master Spectrum -->
+      <div id="spectrum-display">
+        <canvas id="spectrum-canvas" width="220" height="140"></canvas>
+      </div>
+    </section>
+
+    <!-- ──── Deck B ──── -->
+    <section class="deck" id="deck-b" data-deck="B">
+      <div class="deck-header">
+        <span class="deck-label deck-label-b">DECK B</span>
+        <span class="deck-track-name" data-el="trackName">No Track Loaded</span>
+        <span class="deck-bpm" data-el="bpm">--- BPM</span>
+      </div>
+
+      <!-- Waveform -->
+      <div class="waveform-container">
+        <canvas class="waveform-canvas" data-el="waveform" width="560" height="80"></canvas>
+        <div class="waveform-overlay">
+          <span class="time-display" data-el="timeDisplay">0:00 / 0:00</span>
+        </div>
+        <div class="drop-zone" data-el="dropZone">
+          <span>Drop audio file or click to load</span>
+          <input type="file" accept="audio/*" data-el="fileInput" hidden>
+        </div>
+      </div>
+
+      <!-- Transport Controls -->
+      <div class="transport">
+        <button class="btn btn-cue" data-action="cue" title="Cue">CUE</button>
+        <button class="btn btn-play" data-action="play" title="Play/Pause">▶</button>
+        <button class="btn btn-sync" data-action="sync" title="Sync BPM">SYNC</button>
+        <button class="btn btn-loop" data-action="loop" title="Loop 4 bars">LOOP</button>
+      </div>
+
+      <!-- Tempo -->
+      <div class="tempo-section">
+        <label>TEMPO</label>
+        <input type="range" class="tempo-slider" data-el="tempoSlider" min="-50" max="50" value="0" step="0.1">
+        <span class="tempo-display" data-el="tempoDisplay">0.0%</span>
+      </div>
+
+      <!-- EQ + Filter -->
+      <div class="eq-section">
+        <div class="knob-group">
+          <label>HI</label>
+          <input type="range" class="knob" data-param="eqHigh" min="-24" max="6" value="0" step="0.5">
+          <span class="knob-value" data-el="eqHighVal">0 dB</span>
+        </div>
+        <div class="knob-group">
+          <label>MID</label>
+          <input type="range" class="knob" data-param="eqMid" min="-24" max="6" value="0" step="0.5">
+          <span class="knob-value" data-el="eqMidVal">0 dB</span>
+        </div>
+        <div class="knob-group">
+          <label>LOW</label>
+          <input type="range" class="knob" data-param="eqLow" min="-24" max="6" value="0" step="0.5">
+          <span class="knob-value" data-el="eqLowVal">0 dB</span>
+        </div>
+        <div class="knob-group">
+          <label>FILTER</label>
+          <input type="range" class="knob" data-param="filter" min="0" max="100" value="50">
+          <span class="knob-value" data-el="filterVal">OFF</span>
+        </div>
+      </div>
+
+      <!-- Effects -->
+      <div class="fx-section">
+        <div class="fx-slot">
+          <button class="btn btn-fx" data-fx="echo">ECHO</button>
+          <input type="range" class="fx-amount" data-param="echoAmount" min="0" max="100" value="0">
+        </div>
+        <div class="fx-slot">
+          <button class="btn btn-fx" data-fx="reverb">REVERB</button>
+          <input type="range" class="fx-amount" data-param="reverbAmount" min="0" max="100" value="0">
+        </div>
+        <div class="fx-slot">
+          <button class="btn btn-fx" data-fx="distortion">DIST</button>
+          <input type="range" class="fx-amount" data-param="distAmount" min="0" max="100" value="0">
+        </div>
+      </div>
+
+      <!-- Channel Volume -->
+      <div class="channel-vol">
+        <div class="vu-meter">
+          <canvas class="vu-canvas" data-el="vuMeter" width="20" height="120"></canvas>
+        </div>
+        <input type="range" class="volume-fader" data-param="volume" min="0" max="100" value="80" orient="vertical">
+        <span class="vol-display" data-el="volDisplay">80%</span>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ═══ Footer ═══ -->
+  <footer id="bottom-bar">
+    <span class="footer-hint">Keyboard: Space = Play A | Shift+Space = Play B | Q/W = Cue A/B | 1-4 = HotCues A | 5-8 = HotCues B</span>
+  </footer>
 
   <script type="module" src="js/main.js"></script>
 </body>

@@ -142,6 +142,53 @@ Icon?
 .ipynb_checkpoints
 
 # ===========================
+# Audio / Media files (don't commit large assets)
+# ===========================
+
+*.mp3
+*.wav
+*.ogg
+*.flac
+*.m4a
+*.aac
+*.wma
+*.aiff
+*.opus
+*.mid
+*.midi
+
+# ===========================
+# Build & bundler outputs
+# ===========================
+
+.next/
+.nuxt/
+.parcel-cache/
+.turbo/
+.cache/
+*.tsbuildinfo
+*.css.map
+*.js.map
+.sass-cache/
+
+# ===========================
+# Testing & coverage
+# ===========================
+
+coverage/
+.nyc_output/
+*.lcov
+
+# ===========================
+# Archives
+# ===========================
+
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# ===========================
 # Misc
 # ===========================
 

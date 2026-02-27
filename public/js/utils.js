@@ -1,128 +1,239 @@
-// ═══════════════════════════════════════════════
-//  Utility helpers for Audio Playground
-// ═══════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+//  DJ Studio Pro – Utility Functions
+//  Formatters, canvas drawing helpers for waveforms & meters
+// ═══════════════════════════════════════════════════════════
 
-export const WIDTH = 1280;
-export const HEIGHT = 800;
-export const TAU = Math.PI * 2;
+// ── Time formatting ──
 
-// ── Colour helpers ────────────────────────────
+export function formatTime(seconds) {
+  if (!seconds || !isFinite(seconds)) return '0:00';
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
 
-export function hsvToRgb(h, s, v) {
-  h = ((h % 1) + 1) % 1;
-  const i = Math.floor(h * 6);
-  const f = h * 6 - i;
-  const p = v * (1 - s);
-  const q = v * (1 - f * s);
-  const t = v * (1 - (1 - f) * s);
-  let r, g, b;
-  switch (i % 6) {
-    case 0: r = v; g = t; b = p; break;
-    case 1: r = q; g = v; b = p; break;
-    case 2: r = p; g = v; b = t; break;
-    case 3: r = p; g = q; b = v; break;
-    case 4: r = t; g = p; b = v; break;
-    case 5: r = v; g = p; b = q; break;
+// ── Waveform Overview Drawing ──
+
+export function drawWaveformOverview(ctx, canvas, data, progress, accentColor, dimColor, cuePos, hotCues, loopStart, loopEnd) {
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  if (!data || data.length === 0) {
+    ctx.fillStyle = '#111118';
+    ctx.fillRect(0, 0, w, h);
+    return;
   }
-  return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+
+  // Background
+  ctx.fillStyle = '#0a0a0f';
+  ctx.fillRect(0, 0, w, h);
+
+  // Loop region highlight
+  if (loopStart !== null && loopEnd !== null) {
+    ctx.fillStyle = 'rgba(255, 136, 0, 0.08)';
+    const lx = loopStart * w;
+    const lw = (loopEnd - loopStart) * w;
+    ctx.fillRect(lx, 0, lw, h);
+
+    ctx.strokeStyle = 'rgba(255, 136, 0, 0.4)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(lx, 0); ctx.lineTo(lx, h);
+    ctx.moveTo(lx + lw, 0); ctx.lineTo(lx + lw, h);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  const mid = h / 2;
+  const step = Math.max(1, Math.floor(data.length / w));
+  const playX = progress * w;
+
+  // Draw waveform bars
+  for (let i = 0; i < w; i++) {
+    const idx = Math.floor((i / w) * data.length);
+    const val = Math.min(1, data[idx] * 3); // Amplify for visibility
+    const barH = val * mid * 0.9;
+
+    if (i < playX) {
+      ctx.fillStyle = accentColor;
+    } else {
+      ctx.fillStyle = dimColor;
+    }
+
+    // Mirrored waveform
+    ctx.fillRect(i, mid - barH, 1, barH * 2);
+  }
+
+  // Center line
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, mid);
+  ctx.lineTo(w, mid);
+  ctx.stroke();
+
+  // Playhead
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(playX, 0);
+  ctx.lineTo(playX, h);
+  ctx.stroke();
+
+  // Cue point marker
+  if (cuePos > 0 && cuePos < 1) {
+    const cx = cuePos * w;
+    ctx.fillStyle = '#ffcc00';
+    ctx.beginPath();
+    ctx.moveTo(cx, 0);
+    ctx.lineTo(cx + 6, 0);
+    ctx.lineTo(cx, 10);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // Hot cue markers
+  const hotColors = ['#00ff88', '#00aaff', '#ff44ff', '#ffaa00'];
+  if (hotCues) {
+    for (let i = 0; i < hotCues.length; i++) {
+      if (hotCues[i] !== null) {
+        const hx = hotCues[i] * w;
+        ctx.fillStyle = hotColors[i % hotColors.length];
+        ctx.beginPath();
+        ctx.moveTo(hx, h);
+        ctx.lineTo(hx + 5, h);
+        ctx.lineTo(hx, h - 8);
+        ctx.closePath();
+        ctx.fill();
+
+        // Small number
+        ctx.font = 'bold 7px sans-serif';
+        ctx.fillText(String(i + 1), hx + 1, h - 1);
+      }
+    }
+  }
 }
 
-export function hsv(h, s, v, a) {
-  const [r, g, b] = hsvToRgb(h, s, v);
-  return a !== undefined ? `rgba(${r},${g},${b},${a})` : `rgb(${r},${g},${b})`;
+// ── VU Meter Drawing ──
+
+export function drawVUMeter(ctx, canvas, level) {
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  ctx.fillStyle = '#0a0a0f';
+  ctx.fillRect(0, 0, w, h);
+
+  const barH = level * h;
+  const segments = 20;
+  const segH = h / segments;
+  const gap = 1;
+
+  for (let i = 0; i < segments; i++) {
+    const y = h - (i + 1) * segH;
+    const segLevel = (i + 1) / segments;
+
+    if (segLevel <= level) {
+      // Color gradient: green → yellow → red
+      if (segLevel < 0.6) {
+        ctx.fillStyle = '#00cc44';
+      } else if (segLevel < 0.85) {
+        ctx.fillStyle = '#cccc00';
+      } else {
+        ctx.fillStyle = '#ff2244';
+      }
+    } else {
+      ctx.fillStyle = '#1a1a24';
+    }
+
+    ctx.fillRect(1, y + gap, w - 2, segH - gap * 2);
+  }
+
+  // Border
+  ctx.strokeStyle = '#2a2a3a';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(0, 0, w, h);
 }
 
-export function rgb(r, g, b, a) {
-  if (a !== undefined) return `rgba(${r},${g},${b},${a})`;
-  return `rgb(${Math.round(r)},${Math.round(g)},${Math.round(b)})`;
+// ── Spectrum Analyser Drawing ──
+
+export function drawSpectrum(ctx, canvas, freqData) {
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  ctx.fillStyle = '#0a0a0f';
+  ctx.fillRect(0, 0, w, h);
+
+  if (!freqData || freqData.length === 0) return;
+
+  const bars = 64;
+  const barW = w / bars;
+  const gap = 1;
+
+  for (let i = 0; i < bars; i++) {
+    // Map to frequency data (logarithmic distribution)
+    const idx = Math.floor(Math.pow(i / bars, 1.5) * freqData.length);
+    const val = (freqData[idx] || 0) / 255;
+    const barH = val * h * 0.9;
+
+    // Gradient color based on frequency
+    const hue = (i / bars) * 0.7; // Blue to red
+    const r = Math.round(lerp(0, 255, i / bars));
+    const g = Math.round(lerp(180, 40, i / bars));
+    const b = Math.round(lerp(255, 80, i / bars));
+
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    ctx.fillRect(i * barW + gap, h - barH, barW - gap * 2, barH);
+
+    // Reflection
+    ctx.fillStyle = `rgba(${r},${g},${b},0.15)`;
+    ctx.fillRect(i * barW + gap, h - barH - 2, barW - gap * 2, 2);
+  }
+
+  // Grid lines
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 4; i++) {
+    const y = (h / 4) * i;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(w, y);
+    ctx.stroke();
+  }
 }
 
-// ── Math helpers ──────────────────────────────
+// ── Mini Master Spectrum (for top bar) ──
 
-export function clamp(v, lo, hi) {
-  return Math.max(lo, Math.min(hi, v));
+export function drawMasterSpectrum(ctx, canvas, freqData) {
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  if (!freqData || freqData.length === 0) return;
+
+  const bars = 40;
+  const barW = w / bars;
+
+  for (let i = 0; i < bars; i++) {
+    const idx = Math.floor(Math.pow(i / bars, 1.5) * freqData.length);
+    const val = (freqData[idx] || 0) / 255;
+    const barH = val * h * 0.85;
+
+    const intensity = Math.round(100 + val * 155);
+    ctx.fillStyle = `rgba(0, ${intensity}, ${Math.round(intensity * 0.8)}, 0.8)`;
+    ctx.fillRect(i * barW, h - barH, barW - 1, barH);
+  }
 }
 
-export function lerp(a, b, t) {
+// ── Math helpers ──
+
+function lerp(a, b, t) {
   return a + (b - a) * t;
 }
 
-export function dist(x1, y1, x2, y2) {
-  return Math.hypot(x2 - x1, y2 - y1);
-}
-
-export function gauss(mean = 0, std = 1) {
-  // Box-Muller
-  const u1 = Math.random();
-  const u2 = Math.random();
-  return mean + std * Math.sqrt(-2 * Math.log(u1)) * Math.cos(TAU * u2);
-}
-
-// ── Canvas draw helpers ───────────────────────
-
-export function drawLines(ctx, pts, color, width = 1) {
-  if (pts.length < 2) return;
-  ctx.beginPath();
-  ctx.moveTo(pts[0][0], pts[0][1]);
-  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
-  ctx.strokeStyle = color;
-  ctx.lineWidth = width;
-  ctx.stroke();
-}
-
-export function fillCircle(ctx, cx, cy, r, color) {
-  if (r <= 0) return;
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, TAU);
-  ctx.fillStyle = color;
-  ctx.fill();
-}
-
-export function strokeCircle(ctx, cx, cy, r, color, width = 1) {
-  if (r <= 0) return;
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, TAU);
-  ctx.strokeStyle = color;
-  ctx.lineWidth = width;
-  ctx.stroke();
-}
-
-export function fillRect(ctx, x, y, w, h, color, radius) {
-  ctx.fillStyle = color;
-  if (radius) {
-    ctx.beginPath();
-    ctx.roundRect(x, y, w, h, radius);
-    ctx.fill();
-  } else {
-    ctx.fillRect(x, y, w, h);
-  }
-}
-
-export function strokeRect(ctx, x, y, w, h, color, width = 1, radius) {
-  ctx.strokeStyle = color;
-  ctx.lineWidth = width;
-  if (radius) {
-    ctx.beginPath();
-    ctx.roundRect(x, y, w, h, radius);
-    ctx.stroke();
-  } else {
-    ctx.strokeRect(x, y, w, h);
-  }
-}
-
-export function drawText(ctx, text, x, y, color, size = 14, bold = false) {
-  ctx.font = `${bold ? 'bold ' : ''}${size}px Consolas,"Courier New",monospace`;
-  ctx.textBaseline = 'top';
-  ctx.fillStyle = color;
-  ctx.fillText(text, x, y);
-}
-
-export function drawPolygon(ctx, pts, color, fill = true, lineWidth = 1) {
-  if (pts.length < 2) return;
-  ctx.beginPath();
-  ctx.moveTo(pts[0][0], pts[0][1]);
-  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
-  ctx.closePath();
-  if (fill) { ctx.fillStyle = color; ctx.fill(); }
-  else { ctx.strokeStyle = color; ctx.lineWidth = lineWidth; ctx.stroke(); }
+export function clamp(v, lo, hi) {
+  return Math.max(lo, Math.min(hi, v));
 }
