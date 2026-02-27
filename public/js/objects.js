@@ -355,7 +355,7 @@ export class ReverseVortex {
     }
   }
 
-  reset() { this.active = false; this.eng.reverse = false; }
+  reset() { this.active = false; this.eng.setReverse(false); }
 
   handle(type, mx, my, ev) {
     if (type === 'mousedown' && ev.button === 0 && hypot(mx, my, this.cx, this.cy) < this.R) {
@@ -374,7 +374,7 @@ export class ReverseVortex {
       else p.r += (p.base_r - p.r) * 0.03;
       p.hue = (p.hue + dt * 0.15) % 1;
     }
-    this.eng.reverse = this.active;
+    this.eng.setReverse(this.active);
   }
 
   draw(c) {

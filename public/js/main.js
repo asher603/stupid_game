@@ -185,9 +185,6 @@ function loop(time) {
   const dt = Math.min((time - lastTime) / 1000, 0.05);
   lastTime = time;
 
-  // Update reverse state
-  engine.setReverse(engine.reverse);
-
   // Update objects
   for (const obj of objects) obj.update(mouseX, mouseY, dt);
 
