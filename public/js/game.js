@@ -14,7 +14,7 @@
   const JUMP_FORCE    = 14;
   const GRAVITY       = 32;
   const ENEMY_BASE_SPEED = 5;
-  const ENEMY_CATCH_DIST = 1.8;
+  const ENEMY_CATCH_DIST = 0.3;
   const CAMERA_HEIGHT_DEFAULT = 10;
   const CAMERA_HEIGHT_MIN = 3;
   const CAMERA_HEIGHT_MAX = 30;
@@ -54,7 +54,10 @@
   
   let idleAction = null;
   let runAction = null;
-  let jumpAction = null;
+
+  // New Jump sequence actions
+  let jumpStartAction, jumpLiftAction, jumpApexAction;
+  let wasOnGround = true; // Tracks the previous state to detect landing
 
   // ── Enemies ──
   let enemies = [];
@@ -502,23 +505,42 @@
       playerMixer = new THREE.AnimationMixer(model);
       const animations = gltf.animations;
 
-      // Log animation names to the console so we know what they are called
-      console.log("=== Found Animations ===");
-      animations.forEach((clip, index) => {
-         console.log(index + ": " + clip.name);
+      // Find specific animations by their names
+      const idleClip  = THREE.AnimationClip.findByName(animations, 'unnamed.001|spongebob_idle01.anm');
+      const runClip   = THREE.AnimationClip.findByName(animations, 'unnamed.001|spongebob_run02.anm');
+      
+      // Jump sequence clips
+      const startClip = THREE.AnimationClip.findByName(animations, 'unnamed.001|spongebob_jump02_start.anm');
+      const liftClip  = THREE.AnimationClip.findByName(animations, 'unnamed.001|spongebob_jump02_lift_cyc.anm');
+      const apexClip  = THREE.AnimationClip.findByName(animations, 'unnamed.001|spongebob_jump02_apex.anm');
+
+      // Setup Jump Sequence (Play each once and hold last frame)
+      const setupJumpAction = (clip) => {
+        if (!clip) return null;
+        const action = playerMixer.clipAction(clip);
+        action.setLoop(THREE.LoopOnce); 
+        action.clampWhenFinished = true; 
+        return action;
+      };
+
+      jumpStartAction = setupJumpAction(startClip);
+      jumpLiftAction  = setupJumpAction(liftClip);
+      jumpApexAction  = setupJumpAction(apexClip);
+
+      // --- CHAINING LOGIC ---
+      playerMixer.addEventListener('finished', (e) => {
+        if (e.action === jumpStartAction) playNext(jumpLiftAction);
+        else if (e.action === jumpLiftAction) playNext(jumpApexAction);
       });
 
-      // Find specific animations by their names
-      const idleClip = THREE.AnimationClip.findByName(animations, 'unnamed.001|spongebob_idle01.anm');
-      const runClip = THREE.AnimationClip.findByName(animations, 'unnamed.001|spongebob_run02.anm');
-      const jumpClip = THREE.AnimationClip.findByName(animations, 'unnamed.001|spongebob_jump02_lift_cyc.anm');
+      function playNext(nextAction) {
+        if (!nextAction || !currentAction) return;
+        currentAction.fadeOut(0.05);
+        nextAction.reset().fadeIn(0.05).play();
+        currentAction = nextAction;
+      }
 
-      // Create actions
-      if (idleClip) idleAction = playerMixer.clipAction(idleClip);
-      if (runClip) runAction = playerMixer.clipAction(runClip);
-      if (jumpClip) jumpAction = playerMixer.clipAction(jumpClip);
-
-      // Start with idle animation
+      // Start with idle
       if (idleAction) {
         idleAction.play();
         currentAction = idleAction;
@@ -546,15 +568,25 @@
       default: z = HALF_WORLD - 2; x = (Math.random() - 0.5) * WORLD_SIZE; break;
     }
 
-    let mesh;
+    // Create a group to hold both the 3D model and the warning ring
+    const enemyGroup = new THREE.Group();
+    enemyGroup.position.set(x, 0, z);
+
     let mixer = null;
     let runAction = null;
     let attackAction = null;
     let currentAction = null;
 
     if (patrickModel) {
-      // Use SkeletonUtils to clone animated models properly
-      mesh = THREE.SkeletonUtils.clone(patrickModel);
+      // Clone the model
+      const mesh = THREE.SkeletonUtils.clone(patrickModel);
+      
+      // --- ORIENTATION OFFSET ---
+      // If Patrick's left side is the front, rotate him 90 degrees (PI/2)
+      // You might need to try Math.PI / 2 or -Math.PI / 2 depending on the model
+      mesh.rotation.y = Math.PI / 2; 
+      
+      enemyGroup.add(mesh);
       mixer = new THREE.AnimationMixer(mesh);
 
       const runClip = THREE.AnimationClip.findByName(patrickAnimations, '008_Patrick_Run_v2');
@@ -563,20 +595,32 @@
       if (runClip) runAction = mixer.clipAction(runClip);
       if (attackClip) attackAction = mixer.clipAction(attackClip);
 
-      // Start running
+      // Start running animation
       if (runAction) {
         runAction.play();
         currentAction = runAction;
       }
     } else {
-      mesh = createEnemyMesh(index);
+      // Fallback: use the old red cylinder if Patrick hasn't loaded
+      const mesh = createEnemyMesh(index);
+      enemyGroup.add(mesh);
     }
     
-    mesh.position.set(x, 0, z);
-    scene.add(mesh);
+    /*
+    //used for debugging enemy positions
+    // Add a red ring on the floor under each enemy so we can always see them coming!
+    const ringGeo = new THREE.RingGeometry(0.5, 0.8, 24);
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.6, side: THREE.DoubleSide });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.05;
+    enemyGroup.add(ring);
+    */
+
+    scene.add(enemyGroup);
 
     enemies.push({
-      mesh,
+      mesh: enemyGroup, // From now on, we move the entire group together
       x, y: 0, z,
       speed: ENEMY_BASE_SPEED * (0.8 + Math.random() * 0.4) * difficultyMul,
       angle: 0,
@@ -719,7 +763,7 @@
       moveZ /= len;
 
       const targetAngle = Math.atan2(moveX, moveZ);
-      player.angle = lerpAngle(player.angle, targetAngle, 10 * dt);
+      player.angle = lerpAngle(player.angle, targetAngle, 5 * dt);
 
       let nx = player.x + moveX * speed;
       let nz = player.z + moveZ * speed;
@@ -757,21 +801,33 @@
     playerMesh.rotation.y = player.angle;
 
 
-    // --- Logic for switching animations ---
+    // --- Animation State Detection ---
+    const justLanded = (playerOnGround && !wasOnGround);
+    wasOnGround = playerOnGround;
+
+    // --- Chained Animation Logic ---
     if (playerMixer && currentAction) {
-      let targetAction = idleAction; // Default state is standing still
+      const jumpActions = [jumpStartAction, jumpLiftAction, jumpApexAction];
+      const isJumping = jumpActions.includes(currentAction);
 
       if (!playerOnGround) {
-        targetAction = jumpAction; // In the air
-      } else if (moving) {
-        targetAction = runAction;  // Moving on the ground
-      }
-
-      // If the action needs to change, crossfade to the new one
-      if (targetAction && targetAction !== currentAction) {
-        currentAction.fadeOut(0.2); // Fade out old animation over 0.2 seconds
-        targetAction.reset().fadeIn(0.2).play(); // Fade in new animation
-        currentAction = targetAction;
+        // AIR LOGIC: If we just started falling but aren't in jump sequence, start it
+        if (!isJumping && jumpStartAction) {
+          currentAction.fadeOut(0.1);
+          jumpStartAction.reset().fadeIn(0.1).play();
+          currentAction = jumpStartAction;
+        }
+      } else {
+        // GROUND LOGIC: Transition back to Run or Idle
+        let targetAction = moving ? runAction : idleAction;
+        
+        // If we are still in a jump pose while on ground, or need to switch between Run/Idle
+        if (isJumping || (targetAction && targetAction !== currentAction)) {
+          const duration = justLanded ? 0.1 : 0.2;
+          currentAction.fadeOut(duration);
+          targetAction.reset().fadeIn(duration).play();
+          currentAction = targetAction;
+        }
       }
     }
 
@@ -781,29 +837,29 @@
       playerMixer.update(dt);
     }
 
-    // ── Enemies ──
+    // ── Enemies Loop ──
     for (const enemy of enemies) {
-      // Update enemy animation mixer
+      // Update animation mixer for this specific enemy
       if (enemy.mixer) enemy.mixer.update(dt);
 
-      // Manage Attack Cooldown
+      // Manage Dash Attack Cooldown
       if (enemy.attackCooldown > 0) enemy.attackCooldown -= dt;
 
-      // Manage Attack Duration
+      // Manage Dash Attack Duration/State
       if (enemy.attackTimer > 0) {
         enemy.attackTimer -= dt;
         if (enemy.attackTimer <= 0) {
           enemy.isAttacking = false;
-          // Return to running animation smoothly
+          // Smoothly crossfade back to running animation
           if (enemy.runAction && enemy.currentAction !== enemy.runAction) {
-            enemy.currentAction.fadeOut(0.2);
+            if (enemy.currentAction) enemy.currentAction.fadeOut(0.2);
             enemy.runAction.reset().fadeIn(0.2).play();
             enemy.currentAction = enemy.runAction;
           }
         }
       }
 
-      // Direction to player (with simple avoidance)
+      // Calculate vector towards player
       let dx = player.x - enemy.x;
       let dz = player.z - enemy.z;
       const dist = Math.sqrt(dx * dx + dz * dz);
@@ -813,7 +869,7 @@
         dz /= dist;
       }
 
-      // Simple obstacle avoidance
+      // Obstacle avoidance (nudge vector away from buildings)
       let avoidX = 0, avoidZ = 0;
       for (const b of buildings) {
         const bx = enemy.x - b.x;
@@ -825,41 +881,39 @@
         }
       }
 
-      // Check if stuck (not moving much)
-      const prevX = enemy.x, prevZ = enemy.z;
-
-      // Trigger Dash Attack if close enough and cooldown is ready
+      // Trigger Dash Attack if within range and cooldown is ready
       const attackRange = 8.0; 
       if (dist < attackRange && enemy.attackCooldown <= 0 && !enemy.isAttacking) {
         enemy.isAttacking = true;
-        enemy.attackCooldown = 4.0; // Wait 4 seconds before next attack
-        enemy.attackTimer = 1.0;    // The attack animation/dash lasts 1 second
+        enemy.attackCooldown = 4.0; // Cooldown in seconds
+        enemy.attackTimer = 1.0;    // Dash duration in seconds
 
-        // Play the LightCombo3 attack animation
         if (enemy.attackAction && enemy.currentAction !== enemy.attackAction) {
-          enemy.currentAction.fadeOut(0.1);
+          if (enemy.currentAction) enemy.currentAction.fadeOut(0.1);
           enemy.attackAction.reset().fadeIn(0.1).play();
           enemy.currentAction = enemy.attackAction;
         }
       }
 
-      // Calculate speed: move 2.5x faster when attacking!
-      let currentSpeed = enemy.speed * Math.min(difficultyMul, 3) * dt;
-      if (enemy.isAttacking) currentSpeed *= 2.5; 
+      // Store current position to calculate actual movement direction
+      const prevX = enemy.x, prevZ = enemy.z;
 
-      let ex = enemy.x + (dx + avoidX * 0.3) * currentSpeed;
-      let ez = enemy.z + (dz + avoidZ * 0.3) * currentSpeed;
+      // Calculate speed (boost by 2.5x during dash attack)
+      let eSpeed = enemy.speed * Math.min(difficultyMul, 3) * dt;
+      if (enemy.isAttacking) eSpeed *= 2.5; 
 
-      // Enemy building collision
+      // Apply movement with avoidance nudge
+      let ex = enemy.x + (dx + avoidX * 0.3) * eSpeed;
+      let ez = enemy.z + (dz + avoidZ * 0.3) * eSpeed;
+
+      // Collisions and boundaries
       const eResolved = resolveCollisions(ex, ez, 0.6);
       ex = eResolved.x;
       ez = eResolved.z;
-
-      // World bounds
       ex = Math.max(-HALF_WORLD + 1, Math.min(HALF_WORLD - 1, ex));
       ez = Math.max(-HALF_WORLD + 1, Math.min(HALF_WORLD - 1, ez));
 
-      // Un-stuck: if barely moved, nudge sideways
+      // Handling "Stuck" enemies
       const moved = Math.abs(ex - prevX) + Math.abs(ez - prevZ);
       if (moved < eSpeed * 0.1) {
         enemy.stuckTimer += dt;
@@ -867,23 +921,30 @@
           enemy.avoidAngle = (Math.random() - 0.5) * Math.PI;
           enemy.stuckTimer = 0;
         }
-        const aa = enemy.avoidAngle;
-        ex += Math.cos(aa) * eSpeed * 3;
-        ez += Math.sin(aa) * eSpeed * 3;
-        ex = Math.max(-HALF_WORLD + 1, Math.min(HALF_WORLD - 1, ex));
-        ez = Math.max(-HALF_WORLD + 1, Math.min(HALF_WORLD - 1, ez));
+        ex += Math.cos(enemy.avoidAngle) * eSpeed * 3;
+        ez += Math.sin(enemy.avoidAngle) * eSpeed * 3;
       } else {
         enemy.stuckTimer = 0;
       }
 
+      // --- ROTATION LOGIC ---
+      // Determine rotation based on actual displacement vector
+      const actualMoveX = ex - prevX;
+      const actualMoveZ = ez - prevZ;
+
+      if (Math.abs(actualMoveX) > 0.001 || Math.abs(actualMoveZ) > 0.001) {
+          const targetAngle = Math.atan2(actualMoveX, actualMoveZ);
+          // Smoothly interpolate current angle towards the target movement angle
+          enemy.angle = lerpAngle(enemy.angle, targetAngle, 10 * dt);
+      }
+
+      // Apply new position and rotation to the mesh/group
       enemy.x = ex;
       enemy.z = ez;
-      enemy.angle = Math.atan2(dx, dz);
-
       enemy.mesh.position.set(enemy.x, 0, enemy.z);
       enemy.mesh.rotation.y = enemy.angle;
 
-      // Catch check
+      // Catch check (Collision with player)
       const catchDx = player.x - enemy.x;
       const catchDz = player.z - enemy.z;
       const catchDist = Math.sqrt(catchDx * catchDx + catchDz * catchDz);
@@ -1145,18 +1206,33 @@
     patrickModel = gltf.scene;
     patrickAnimations = gltf.animations;
     
-    // Adjust scale if Patrick is too big or too small
-    patrickModel.scale.set(1, 1, 1); 
+    // --- SCALE ADJUSTMENT ---
+    // Start with 1, 1, 1. If he's invisible, we will check the console log below.
+    patrickModel.scale.set(220, 220, 220); 
+
+    // DEBUG: Measure the actual size of the model in world units
+    const bbox = new THREE.Box3().setFromObject(patrickModel);
+    const size = bbox.getSize(new THREE.Vector3());
+    console.log("Patrick's actual size in world units:", size);
     
-    // Enable shadows
+    // Enable shadows and fix visibility/brightness
     patrickModel.traverse(function(child) {
       if (child.isMesh) {
         child.castShadow = true;
         child.receiveShadow = true;
+        
+        if (child.material) {
+            child.material.depthWrite = true;
+            child.material.transparent = false;
+            child.material.opacity = 1;
+
+            // --- ADD THESE LINES TO MAKE HIM BRIGHTER ---
+            child.material.emissive = new THREE.Color(0xffffff); // White emissive light
+            child.material.emissiveIntensity = 0.2;            // Adjust between 0.1 to 0.5 for brightness
+        }
       }
     });
 
-    // Print Patrick's animations to the console!
     console.log("=== Patrick Animations ===");
     patrickAnimations.forEach((clip, index) => {
        console.log(index + ": " + clip.name);
