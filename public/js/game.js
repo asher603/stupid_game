@@ -703,6 +703,7 @@
     nextEnemySpawn = ENEMY_SPAWN_INTERVAL;
     difficultyMul = 1;
     messageTimer = 0;
+    lastShoutTime = -2.0;
 
     // Clean old objects
     enemies.forEach(e => scene.remove(e.mesh));
