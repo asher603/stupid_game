@@ -768,6 +768,9 @@
     }
 
     const canSprint = sprinting && stamina > 0;
+    if (runAction) {
+      runAction.timeScale = canSprint ? 2.0 : 1.0;
+    }
     const speed = (canSprint ? SPRINT_SPEED : PLAYER_SPEED) * dt;
 
     // Step sounds logic with speed adjustment
