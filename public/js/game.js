@@ -505,10 +505,13 @@
       playerMixer = new THREE.AnimationMixer(model);
       const animations = gltf.animations;
 
-      // Find specific animations by their names
       const idleClip  = THREE.AnimationClip.findByName(animations, 'unnamed.001|spongebob_idle01.anm');
       const runClip   = THREE.AnimationClip.findByName(animations, 'unnamed.001|spongebob_run02.anm');
       
+      idleAction = playerMixer.clipAction(idleClip);
+      runAction  = playerMixer.clipAction(runClip);
+      
+      // Jump sequence clips
       // Jump sequence clips
       const startClip = THREE.AnimationClip.findByName(animations, 'unnamed.001|spongebob_jump02_start.anm');
       const liftClip  = THREE.AnimationClip.findByName(animations, 'unnamed.001|spongebob_jump02_lift_cyc.anm');
