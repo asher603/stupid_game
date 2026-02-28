@@ -145,8 +145,8 @@ Icon?
 # Audio / Media files (don't commit large assets)
 # ===========================
 
-*.mp3
-*.wav
+# *.mp3
+# *.wav
 *.ogg
 *.flac
 *.m4a
