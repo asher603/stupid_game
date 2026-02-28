@@ -14,7 +14,7 @@
   const JUMP_FORCE    = 14;
   const GRAVITY       = 32;
   const ENEMY_BASE_SPEED = 5;
-  const ENEMY_CATCH_DIST = 0.3;
+  const ENEMY_CATCH_DIST = 0.8;
   const CAMERA_HEIGHT_DEFAULT = 10;
   const CAMERA_HEIGHT_MIN = 3;
   const CAMERA_HEIGHT_MAX = 30;
