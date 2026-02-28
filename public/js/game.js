@@ -1324,6 +1324,19 @@
     });
   });
 
+  // Load Mr. Krabs model to find animation names
+  const krabsLoader = new THREE.GLTFLoader();
+  krabsLoader.load('models/mr_krabs.glb', function(gltf) {
+    const krabsAnimations = gltf.animations;
+    
+    console.log("=== Mr. Krabs Animations ===");
+    krabsAnimations.forEach((clip, index) => {
+       console.log(index + ": " + clip.name);
+    });
+  }, undefined, function(error) {
+    console.error('Error loading Mr. Krabs model:', error);
+  });
+
   initThree();
   buildWorld();   // Show background on start screen
   animate();
