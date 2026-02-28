@@ -30,6 +30,10 @@
   const INITIAL_ENEMIES = 3;
   const COIN_COUNT     = 15;
 
+
+  // ── Audio ──
+  let bgm, jumpSound, landSound, stepSound;
+
   // ── Three.js Setup ──
   let scene, camera, renderer;
   let clock;
@@ -142,6 +146,17 @@
       camera.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
     });
+
+    // Load Sounds
+    bgm = new Audio('sounds/bgm.mp3');
+    bgm.loop = true;
+    bgm.volume = 0.4;
+
+    jumpSound = new Audio('sounds/jump.mp3');
+    landSound = new Audio('sounds/player_landing.mp3');
+    stepSound = new Audio('sounds/player_steps.mp3');
+    stepSound.loop = true;
+    stepSound.volume = 0.6;
   }
 
   // ═══════════════════════════════════════
@@ -507,7 +522,7 @@
 
       const idleClip  = THREE.AnimationClip.findByName(animations, 'unnamed.001|spongebob_idle01.anm');
       const runClip   = THREE.AnimationClip.findByName(animations, 'unnamed.001|spongebob_run02.anm');
-      
+
       idleAction = playerMixer.clipAction(idleClip);
       runAction  = playerMixer.clipAction(runClip);
       
@@ -689,6 +704,11 @@
     buildWorld();
     spawnPlayer();
 
+    if (bgm) {
+      bgm.currentTime = 0;
+      bgm.play().catch(e => console.log("Audio block:", e));
+    }
+
     for (let i = 0; i < INITIAL_ENEMIES; i++) spawnEnemy(i);
     for (let i = 0; i < COIN_COUNT; i++) spawnCoin();
 
@@ -706,6 +726,9 @@
     finalScoreVal.textContent = score;
     startBtn.textContent = 'PLAY AGAIN';
     overlay.classList.add('active');
+
+    if (bgm) bgm.pause();
+    if (stepSound) stepSound.pause();
   }
 
   function showMessage(text, duration) {
@@ -746,6 +769,18 @@
 
     const canSprint = sprinting && stamina > 0;
     const speed = (canSprint ? SPRINT_SPEED : PLAYER_SPEED) * dt;
+
+    // Step sounds logic with speed adjustment
+    if (moving && playerOnGround) {
+      if (stepSound) {
+        // Adjust playback rate based on sprinting state (faster when sprinting, slower when walking)
+        stepSound.playbackRate = canSprint ? 1.0 : 0.5;
+        
+        if (stepSound.paused) stepSound.play();
+      }
+    } else {
+      if (stepSound && !stepSound.paused) stepSound.pause();
+    }
 
     if (moving) {
       // Camera forward direction on XZ plane (from camera towards player)
@@ -788,6 +823,11 @@
     if ((keys['Space']) && playerOnGround) {
       playerVelY = JUMP_FORCE;
       playerOnGround = false;
+
+      if (jumpSound) {
+        jumpSound.currentTime = 0;
+        jumpSound.play();
+      }
     }
 
     // Gravity
@@ -806,6 +846,10 @@
 
     // --- Animation State Detection ---
     const justLanded = (playerOnGround && !wasOnGround);
+    if (justLanded && landSound) {
+        landSound.currentTime = 0;
+        landSound.play();
+    }
     wasOnGround = playerOnGround;
 
     // --- Chained Animation Logic ---
