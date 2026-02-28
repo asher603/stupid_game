@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-//  Patrick Run! — 3D Chase Game
+//  SpongeBob Run! — 3D Chase Game
 //  Three.js third-person survival game
 // ═══════════════════════════════════════════════════════════
 
@@ -58,6 +58,8 @@
 
   // ── Enemies ──
   let enemies = [];
+  let patrickModel = null;      // Stores the Patrick 3D model
+  let patrickAnimations = [];   // Stores Patrick's animations
 
   // ── Coins / Pickups ──
   let coins = [];
@@ -535,17 +537,41 @@
   }
 
   function spawnEnemy(index) {
-    // Spawn at a random edge position
     const side = Math.floor(Math.random() * 4);
     let x, z;
     switch (side) {
       case 0: x = -HALF_WORLD + 2; z = (Math.random() - 0.5) * WORLD_SIZE; break;
       case 1: x = HALF_WORLD - 2;  z = (Math.random() - 0.5) * WORLD_SIZE; break;
       case 2: z = -HALF_WORLD + 2; x = (Math.random() - 0.5) * WORLD_SIZE; break;
-      default: z = HALF_WORLD - 2;  x = (Math.random() - 0.5) * WORLD_SIZE; break;
+      default: z = HALF_WORLD - 2; x = (Math.random() - 0.5) * WORLD_SIZE; break;
     }
 
-    const mesh = createEnemyMesh(index);
+    let mesh;
+    let mixer = null;
+    let runAction = null;
+    let attackAction = null;
+    let currentAction = null;
+
+    if (patrickModel) {
+      // Use SkeletonUtils to clone animated models properly
+      mesh = THREE.SkeletonUtils.clone(patrickModel);
+      mixer = new THREE.AnimationMixer(mesh);
+
+      const runClip = THREE.AnimationClip.findByName(patrickAnimations, '008_Patrick_Run_v2');
+      const attackClip = THREE.AnimationClip.findByName(patrickAnimations, '008_Patrick_LightCombo3_v3');
+
+      if (runClip) runAction = mixer.clipAction(runClip);
+      if (attackClip) attackAction = mixer.clipAction(attackClip);
+
+      // Start running
+      if (runAction) {
+        runAction.play();
+        currentAction = runAction;
+      }
+    } else {
+      mesh = createEnemyMesh(index);
+    }
+    
     mesh.position.set(x, 0, z);
     scene.add(mesh);
 
@@ -556,6 +582,14 @@
       angle: 0,
       stuckTimer: 0,
       avoidAngle: 0,
+      // Animation and attack logic properties
+      mixer: mixer,
+      runAction: runAction,
+      attackAction: attackAction,
+      currentAction: currentAction,
+      attackCooldown: 0,
+      isAttacking: false,
+      attackTimer: 0
     });
   }
 
@@ -749,6 +783,26 @@
 
     // ── Enemies ──
     for (const enemy of enemies) {
+      // Update enemy animation mixer
+      if (enemy.mixer) enemy.mixer.update(dt);
+
+      // Manage Attack Cooldown
+      if (enemy.attackCooldown > 0) enemy.attackCooldown -= dt;
+
+      // Manage Attack Duration
+      if (enemy.attackTimer > 0) {
+        enemy.attackTimer -= dt;
+        if (enemy.attackTimer <= 0) {
+          enemy.isAttacking = false;
+          // Return to running animation smoothly
+          if (enemy.runAction && enemy.currentAction !== enemy.runAction) {
+            enemy.currentAction.fadeOut(0.2);
+            enemy.runAction.reset().fadeIn(0.2).play();
+            enemy.currentAction = enemy.runAction;
+          }
+        }
+      }
+
       // Direction to player (with simple avoidance)
       let dx = player.x - enemy.x;
       let dz = player.z - enemy.z;
@@ -774,9 +828,27 @@
       // Check if stuck (not moving much)
       const prevX = enemy.x, prevZ = enemy.z;
 
-      const eSpeed = enemy.speed * Math.min(difficultyMul, 3) * dt;
-      let ex = enemy.x + (dx + avoidX * 0.3) * eSpeed;
-      let ez = enemy.z + (dz + avoidZ * 0.3) * eSpeed;
+      // Trigger Dash Attack if close enough and cooldown is ready
+      const attackRange = 8.0; 
+      if (dist < attackRange && enemy.attackCooldown <= 0 && !enemy.isAttacking) {
+        enemy.isAttacking = true;
+        enemy.attackCooldown = 4.0; // Wait 4 seconds before next attack
+        enemy.attackTimer = 1.0;    // The attack animation/dash lasts 1 second
+
+        // Play the LightCombo3 attack animation
+        if (enemy.attackAction && enemy.currentAction !== enemy.attackAction) {
+          enemy.currentAction.fadeOut(0.1);
+          enemy.attackAction.reset().fadeIn(0.1).play();
+          enemy.currentAction = enemy.attackAction;
+        }
+      }
+
+      // Calculate speed: move 2.5x faster when attacking!
+      let currentSpeed = enemy.speed * Math.min(difficultyMul, 3) * dt;
+      if (enemy.isAttacking) currentSpeed *= 2.5; 
+
+      let ex = enemy.x + (dx + avoidX * 0.3) * currentSpeed;
+      let ez = enemy.z + (dz + avoidZ * 0.3) * currentSpeed;
 
       // Enemy building collision
       const eResolved = resolveCollisions(ex, ez, 0.6);
@@ -810,11 +882,6 @@
 
       enemy.mesh.position.set(enemy.x, 0, enemy.z);
       enemy.mesh.rotation.y = enemy.angle;
-
-      // Animate
-      const eAnimSpeed = 10;
-      const eSwing = Math.sin(gameTime * eAnimSpeed + enemy.x) * 0.6;
-      animateLimbs(enemy.mesh, eSwing);
 
       // Catch check
       const catchDx = player.x - enemy.x;
@@ -923,15 +990,6 @@
     }
 
     return { x, z };
-  }
-
-  function animateLimbs(mesh, swing) {
-    mesh.traverse(child => {
-      if (child.name === 'armL') child.rotation.x = swing;
-      if (child.name === 'armR') child.rotation.x = -swing;
-      if (child.name === 'legL') child.rotation.x = -swing;
-      if (child.name === 'legR') child.rotation.x = swing;
-    });
   }
 
   function updateCamera(dt) {
@@ -1078,6 +1136,31 @@
 
   startBtn.addEventListener('click', () => {
     startGame();
+  });
+
+
+  // Load Patrick model for enemies
+  const enemyLoader = new THREE.GLTFLoader();
+  enemyLoader.load('models/patrick.glb', function(gltf) {
+    patrickModel = gltf.scene;
+    patrickAnimations = gltf.animations;
+    
+    // Adjust scale if Patrick is too big or too small
+    patrickModel.scale.set(1, 1, 1); 
+    
+    // Enable shadows
+    patrickModel.traverse(function(child) {
+      if (child.isMesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
+    });
+
+    // Print Patrick's animations to the console!
+    console.log("=== Patrick Animations ===");
+    patrickAnimations.forEach((clip, index) => {
+       console.log(index + ": " + clip.name);
+    });
   });
 
   initThree();
