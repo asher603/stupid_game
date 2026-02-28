@@ -1,6 +1,6 @@
 {
-  "name": "patrick-box",
+  "name": "patrick-run",
   "version": "1.0.0",
-  "description": "patrick box",
+  "description": "3D chase survival game",
   "private": true
 }
