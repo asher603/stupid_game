@@ -48,6 +48,13 @@
   let playerVelY = 0;
   let playerOnGround = true;
   let playerMesh = null;
+  
+  let playerMixer = null;
+  let currentAction = null;
+  
+  let idleAction = null;
+  let runAction = null;
+  let jumpAction = null;
 
   // ── Enemies ──
   let enemies = [];
@@ -465,9 +472,60 @@
   // ═══════════════════════════════════════
 
   function spawnPlayer() {
-    playerMesh = createPlayerMesh();
-    playerMesh.position.set(0, 0, 0);
+    // Create an empty group to hold the player so the game doesn't crash while loading
+    playerMesh = new THREE.Group(); 
     scene.add(playerMesh);
+
+    const loader = new THREE.GLTFLoader();
+    
+    // Load the GLB model (ensure the path is correct)
+    loader.load('models/spongebob.glb', function(gltf) {
+      const model = gltf.scene;
+      
+      // Adjust the scale if the model is too big or too small
+      model.scale.set(1, 1, 1); 
+      
+      // Enable shadows for the model
+      model.traverse(function(child) {
+        if (child.isMesh) {
+          child.castShadow = true;
+          child.receiveShadow = true;
+        }
+      });
+
+      // Add the loaded model to the player group
+      playerMesh.add(model);
+
+      // Set up the animation mixer
+      playerMixer = new THREE.AnimationMixer(model);
+      const animations = gltf.animations;
+
+      // Log animation names to the console so we know what they are called
+      console.log("=== Found Animations ===");
+      animations.forEach((clip, index) => {
+         console.log(index + ": " + clip.name);
+      });
+
+      // Find specific animations by their names
+      const idleClip = THREE.AnimationClip.findByName(animations, 'unnamed.001|spongebob_idle01.anm');
+      const runClip = THREE.AnimationClip.findByName(animations, 'unnamed.001|spongebob_run02.anm');
+      const jumpClip = THREE.AnimationClip.findByName(animations, 'unnamed.001|spongebob_jump02_lift_cyc.anm');
+
+      // Create actions
+      if (idleClip) idleAction = playerMixer.clipAction(idleClip);
+      if (runClip) runAction = playerMixer.clipAction(runClip);
+      if (jumpClip) jumpAction = playerMixer.clipAction(jumpClip);
+
+      // Start with idle animation
+      if (idleAction) {
+        idleAction.play();
+        currentAction = idleAction;
+      }
+
+    }, undefined, function(error) {
+      console.error('An error happened while loading the model:', error);
+    });
+
     player = {
       x: 0, y: 0, z: 0,
       angle: 0,
@@ -660,17 +718,33 @@
       playerOnGround = true;
     }
 
-    // Update player mesh
+    // Update player mesh position and rotation
     playerMesh.position.set(player.x, player.y, player.z);
     playerMesh.rotation.y = player.angle;
 
-    // Animate player limbs
-    if (moving) {
-      const animSpeed = canSprint ? 14 : 8;
-      const swing = Math.sin(gameTime * animSpeed) * 0.6;
-      animateLimbs(playerMesh, swing);
-    } else {
-      animateLimbs(playerMesh, 0);
+
+    // --- Logic for switching animations ---
+    if (playerMixer && currentAction) {
+      let targetAction = idleAction; // Default state is standing still
+
+      if (!playerOnGround) {
+        targetAction = jumpAction; // In the air
+      } else if (moving) {
+        targetAction = runAction;  // Moving on the ground
+      }
+
+      // If the action needs to change, crossfade to the new one
+      if (targetAction && targetAction !== currentAction) {
+        currentAction.fadeOut(0.2); // Fade out old animation over 0.2 seconds
+        targetAction.reset().fadeIn(0.2).play(); // Fade in new animation
+        currentAction = targetAction;
+      }
+    }
+
+
+    // Update the 3D model animation
+    if (playerMixer) {
+      playerMixer.update(dt);
     }
 
     // ── Enemies ──
