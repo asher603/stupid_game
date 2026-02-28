@@ -33,6 +33,8 @@
 
   // ── Audio ──
   let bgm, jumpSound, landSound, stepSound;
+  let shoutSounds = [];
+  let lastShoutTime = -2.0; // Allows shouting immediately when the game starts
 
   // ── Three.js Setup ──
   let scene, camera, renderer;
@@ -157,6 +159,14 @@
     stepSound = new Audio('sounds/player_steps.mp3');
     stepSound.loop = true;
     stepSound.volume = 0.6;
+
+    const shoutFiles = ['patrick_you_fat.mp3', 'get_away_from_me.mp3', 'you_smell_like.mp3', 'if_i_had.mp3'];
+
+    shoutFiles.forEach(fileName => {
+        const audio = new Audio(`sounds/${fileName}`);
+        audio.volume = 0.8;
+        shoutSounds.push(audio);
+    });
   }
 
   // ═══════════════════════════════════════
@@ -913,6 +923,30 @@
       let dx = player.x - enemy.x;
       let dz = player.z - enemy.z;
       const dist = Math.sqrt(dx * dx + dz * dz);
+
+      // --- RANDOM SHOUT LOGIC (Fully Dynamic) ---
+      const shoutRange = 6.0;    
+      const shoutCooldown = 2.0; 
+
+      // Check distance and global cooldown
+      if (dist < shoutRange && (gameTime - lastShoutTime) >= shoutCooldown) {
+          // Verify we actually have sounds loaded in the array
+          if (shoutSounds.length > 0) {
+              // Pick a random index based on the CURRENT length of the list
+              const randomIndex = Math.floor(Math.random() * shoutSounds.length);
+              const soundToPlay = shoutSounds[randomIndex];
+
+              // Play only if the sound object exists and is loaded
+              if (soundToPlay) {
+                  soundToPlay.currentTime = 0;
+                  soundToPlay.play().catch(e => console.log("Audio playback blocked or failed:", e));
+                  
+                  // Update the global cooldown timer
+                  lastShoutTime = gameTime;
+              }
+          }
+      }
+      // ------------------------------------------
 
       if (dist > 0.1) {
         dx /= dist;
