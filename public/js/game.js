@@ -15,9 +15,13 @@
   const GRAVITY       = 32;
   const ENEMY_BASE_SPEED = 5;
   const ENEMY_CATCH_DIST = 1.8;
-  const CAMERA_HEIGHT = 10;
+  const CAMERA_HEIGHT_DEFAULT = 10;
+  const CAMERA_HEIGHT_MIN = 3;
+  const CAMERA_HEIGHT_MAX = 30;
+  const CAMERA_HEIGHT_SPEED = 12; // units per second
   const CAMERA_DIST   = 16;
   const CAMERA_LERP   = 4;
+  let cameraHeight = CAMERA_HEIGHT_DEFAULT;
   const STAMINA_MAX   = 100;
   const STAMINA_DRAIN = 30;  // per second
   const STAMINA_REGEN = 20;  // per second
@@ -83,7 +87,7 @@
     scene.fog = new THREE.FogExp2(0x1a1a2e, 0.012);
 
     camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 300);
-    camera.position.set(0, CAMERA_HEIGHT, CAMERA_DIST);
+    camera.position.set(0, cameraHeight, CAMERA_DIST);
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -314,7 +318,7 @@
     const group = new THREE.Group();
 
     // Body
-    const bodyGeo = new THREE.CapsuleGeometry(0.4, 0.8, 8, 16);
+    const bodyGeo = new THREE.CylinderGeometry(0.4, 0.4, 1.6, 16);
     const bodyMat = new THREE.MeshStandardMaterial({ color: 0x00bbff, roughness: 0.4, metalness: 0.1 });
     const body = new THREE.Mesh(bodyGeo, bodyMat);
     body.position.y = 1.0;
@@ -340,7 +344,7 @@
     group.add(eyeR);
 
     // Left arm
-    const armGeo = new THREE.CapsuleGeometry(0.12, 0.5, 4, 8);
+    const armGeo = new THREE.CylinderGeometry(0.12, 0.12, 0.74, 8);
     const armMat = new THREE.MeshStandardMaterial({ color: 0x00bbff, roughness: 0.4 });
     const armL = new THREE.Mesh(armGeo, armMat);
     armL.position.set(-0.6, 1.0, 0);
@@ -352,7 +356,7 @@
     group.add(armR);
 
     // Left leg
-    const legGeo = new THREE.CapsuleGeometry(0.14, 0.5, 4, 8);
+    const legGeo = new THREE.CylinderGeometry(0.14, 0.14, 0.78, 8);
     const legMat = new THREE.MeshStandardMaterial({ color: 0x2244aa, roughness: 0.5 });
     const legL = new THREE.Mesh(legGeo, legMat);
     legL.position.set(-0.2, 0.35, 0);
@@ -381,7 +385,7 @@
     const color = enemyColors[index % enemyColors.length];
 
     // Body
-    const bodyGeo = new THREE.CapsuleGeometry(0.45, 0.7, 8, 16);
+    const bodyGeo = new THREE.CylinderGeometry(0.45, 0.45, 1.6, 16);
     const bodyMat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.3, metalness: 0.2 });
     const body = new THREE.Mesh(bodyGeo, bodyMat);
     body.position.y = 1.0;
@@ -407,7 +411,7 @@
     group.add(eyeR);
 
     // Arms
-    const armGeo = new THREE.CapsuleGeometry(0.13, 0.5, 4, 8);
+    const armGeo = new THREE.CylinderGeometry(0.13, 0.13, 0.76, 8);
     const armMat = new THREE.MeshStandardMaterial({ color, roughness: 0.3 });
     const armL = new THREE.Mesh(armGeo, armMat);
     armL.position.set(-0.65, 1.0, 0);
@@ -419,7 +423,7 @@
     group.add(armR);
 
     // Legs
-    const legGeo = new THREE.CapsuleGeometry(0.15, 0.5, 4, 8);
+    const legGeo = new THREE.CylinderGeometry(0.15, 0.15, 0.8, 8);
     const legMat = new THREE.MeshStandardMaterial({ color: 0x331111, roughness: 0.5 });
     const legL = new THREE.Mesh(legGeo, legMat);
     legL.position.set(-0.22, 0.35, 0);
@@ -584,14 +588,14 @@
     // Increase difficulty over time
     difficultyMul = 1 + gameTime / 60; // +100% speed per minute
 
-    // ── Player Movement ──
-    let moveX = 0, moveZ = 0;
-    if (keys['KeyW'] || keys['ArrowUp'])    moveZ -= 1;
-    if (keys['KeyS'] || keys['ArrowDown'])  moveZ += 1;
-    if (keys['KeyA'] || keys['ArrowLeft'])  moveX -= 1;
-    if (keys['KeyD'] || keys['ArrowRight']) moveX += 1;
+    // ── Player Movement (camera-relative) ──
+    let inputForward = 0, inputRight = 0;
+    if (keys['KeyW'] || keys['ArrowUp'])    inputForward += 1;
+    if (keys['KeyS'] || keys['ArrowDown'])  inputForward -= 1;
+    if (keys['KeyA'] || keys['ArrowLeft'])  inputRight -= 1;
+    if (keys['KeyD'] || keys['ArrowRight']) inputRight += 1;
 
-    const moving = moveX !== 0 || moveZ !== 0;
+    const moving = inputForward !== 0 || inputRight !== 0;
     const sprinting = keys['ShiftLeft'] || keys['ShiftRight'];
 
     // Stamina
@@ -605,6 +609,19 @@
     const speed = (canSprint ? SPRINT_SPEED : PLAYER_SPEED) * dt;
 
     if (moving) {
+      // Camera forward direction on XZ plane (from camera towards player)
+      const camFwdX = player.x - camera.position.x;
+      const camFwdZ = player.z - camera.position.z;
+      const camLen = Math.sqrt(camFwdX * camFwdX + camFwdZ * camFwdZ) || 1;
+      const fwdX = camFwdX / camLen;
+      const fwdZ = camFwdZ / camLen;
+      // Right vector (perpendicular to forward)
+      const rightX = -fwdZ;
+      const rightZ = fwdX;
+
+      // Transform input to world direction
+      let moveX = fwdX * inputForward + rightX * inputRight;
+      let moveZ = fwdZ * inputForward + rightZ * inputRight;
       const len = Math.sqrt(moveX * moveX + moveZ * moveZ);
       moveX /= len;
       moveZ /= len;
@@ -844,10 +861,14 @@
   }
 
   function updateCamera(dt) {
+    // Q = raise POV, E = lower POV
+    if (keys['KeyQ']) cameraHeight = Math.min(CAMERA_HEIGHT_MAX, cameraHeight + CAMERA_HEIGHT_SPEED * dt);
+    if (keys['KeyE']) cameraHeight = Math.max(CAMERA_HEIGHT_MIN, cameraHeight - CAMERA_HEIGHT_SPEED * dt);
+
     // Third-person camera behind and above player
     const idealOffset = new THREE.Vector3(
       -Math.sin(player.angle) * CAMERA_DIST,
-      CAMERA_HEIGHT,
+      cameraHeight,
       -Math.cos(player.angle) * CAMERA_DIST
     );
     const idealTarget = new THREE.Vector3(player.x, player.y + 2, player.z);
