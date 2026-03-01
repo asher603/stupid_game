@@ -307,6 +307,27 @@ kbd {
   opacity: 1;
 }
 
+/* ── Crosshair ── */
+
+#crosshair {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 24px;
+  font-weight: 300;
+  font-family: monospace;
+  z-index: 20;
+  pointer-events: none;
+  text-shadow: 0 0 4px rgba(0, 0, 0, 0.8);
+  display: none;
+}
+
+#crosshair.visible {
+  display: block;
+}
+
 /* ── Level Progress Bar ── */
 
 #level-bar {

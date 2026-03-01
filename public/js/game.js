@@ -48,6 +48,15 @@
 
   const LOW_BLOCK_HEIGHT = 1.2;   // Height of jumpable blocks
 
+  // M16 / Shooting
+  const SHOOT_COOLDOWN    = 0.12;   // Seconds between shots
+  const BULLET_SPEED      = 120;
+  const BULLET_MAX_DIST   = 80;
+  const BULLET_DAMAGE     = 1;      // Hits to kill
+  const ENEMY_HP          = 2;      // Hits each enemy can take
+  const MUZZLE_FLASH_TIME = 0.06;
+  const TRACER_LIFETIME   = 0.15;
+
   // Player boost per level (stacks)
   const PLAYER_SPEED_BOOST  = 0.08;   // +8% speed per level
   const PLAYER_JUMP_BOOST   = 0.06;   // +6% jump per level
@@ -285,6 +294,8 @@
   let patrickAnimations = [];
   let krabsModel        = null;
   let krabsAnimations   = [];
+  let m16Model          = null;
+  let m16Mesh           = null;    // Instance attached to player
 
   // World objects
   let enemies   = [];
@@ -293,6 +304,14 @@
   let trees     = [];
   let lowBlocks = [];   // Jumpable platforms
   let decorations = []; // Animated decorative elements (no collision)
+
+  // Shooting
+  let bullets       = [];
+  let shootCooldown = 0;
+  let muzzleFlashMesh = null;
+  let muzzleFlashTimer = 0;
+  let tracers       = [];   // { mesh, timer }
+  let shootSound    = null;
 
   // Input
   const keys = {};
@@ -333,6 +352,7 @@
   const sensitivityValue  = document.getElementById('sensitivity-value');
   const minimapCanvas  = document.getElementById('minimap');
   const minimapCtx     = minimapCanvas.getContext('2d');
+  const crosshairEl    = document.getElementById('crosshair');
 
   // Level select
   const levelSelectScreen = document.getElementById('level-select-screen');
@@ -379,6 +399,11 @@
     stepSound = new Audio('sounds/player_steps.mp3');
     stepSound.loop = true;
     stepSound.volume = 0.6;
+
+    shootSound = new Audio('sounds/shoot.mp3');
+    shootSound.volume = 0.5;
+    // Fallback: if shoot.mp3 doesn't load, we'll use Web Audio
+    shootSound.addEventListener('error', () => { shootSound = null; });
 
     ['patrick_you_fat.mp3', 'get_away_from_me.mp3', 'you_smell_like.mp3', 'if_i_had.mp3'].forEach(f => {
       const a = new Audio(`sounds/${f}`);
@@ -1068,7 +1093,9 @@
 
   function updateDecorations(dt) {
     const t = clock.elapsedTime;
-    for (const d of decorations) {
+    for (let i = decorations.length - 1; i >= 0; i--) {
+      const d = decorations[i];
+      if (d.type === 'dead') { decorations.splice(i, 1); continue; }
       switch (d.type) {
         case 'bubble':
           d.mesh.position.y = d.baseY + Math.sin(t * d.speed + d.phase) * 1.5;
@@ -1143,6 +1170,19 @@
         case 'fireFlicker':
           d.mesh.scale.y = 0.8 + 0.4 * Math.sin(t * 6 + d.phase);
           d.mesh.scale.x = 0.9 + 0.2 * Math.sin(t * 5 + d.phase + 1);
+          break;
+
+        case 'deathParticle':
+          d.mesh.position.x += d.vx * dt;
+          d.mesh.position.y += d.vy * dt;
+          d.mesh.position.z += d.vz * dt;
+          d.vy -= 10 * dt; // gravity
+          d.life -= dt;
+          d.mesh.material.opacity = Math.max(0, d.life / 0.6);
+          if (d.life <= 0) {
+            scene.remove(d.mesh);
+            d.type = 'dead'; // mark for cleanup
+          }
           break;
       }
     }
@@ -1245,6 +1285,32 @@
       if (idleAction) { idleAction.play(); currentAction = idleAction; }
     }, undefined, (err) => console.error('Error loading SpongeBob:', err));
 
+    // Attach M16 to player
+    const gunLoader = new THREE.GLTFLoader();
+    gunLoader.load('models/m16.glb', (gltf) => {
+      m16Mesh = gltf.scene;
+      // Scale & position the gun at the player's right side
+      const bbox = new THREE.Box3().setFromObject(m16Mesh);
+      const size = bbox.getSize(new THREE.Vector3());
+      const s = 1.2 / (size.y || 1);
+      m16Mesh.scale.set(s, s, s);
+      m16Mesh.position.set(0.5, 1.2, -0.4);  // right side, chest height, slightly forward
+      m16Mesh.rotation.set(0, Math.PI, 0);    // flip to face same direction as player
+      m16Mesh.traverse(child => {
+        if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; }
+      });
+      playerMesh.add(m16Mesh);
+
+      // Muzzle flash (attached to gun barrel tip)
+      const flashGeo = new THREE.SphereGeometry(0.15, 6, 6);
+      const flashMat = new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0 });
+      muzzleFlashMesh = new THREE.Mesh(flashGeo, flashMat);
+      muzzleFlashMesh.position.set(0, 0.1, -0.8); // tip of barrel
+      m16Mesh.add(muzzleFlashMesh);
+
+      console.log('M16 loaded and attached to player');
+    }, undefined, (err) => console.error('Error loading M16:', err));
+
     player = { x: 0, y: 0, z: 0, angle: 0 };
     playerVelY = 0;
     playerOnGround = true;
@@ -1317,6 +1383,7 @@
       jumpTimer: 0.3 + Math.random() * 0.3,
       isPaused: false, pauseTimer: 0,
       jumpDirX: 0, jumpDirZ: 0,
+      hp: ENEMY_HP,
     });
   }
 
@@ -1483,6 +1550,7 @@
     overlay.classList.remove('active');
     hudEl.classList.add('visible');
     minimapCanvas.classList.add('visible');
+    if (crosshairEl) crosshairEl.classList.add('visible');
     if (levelBar) levelBar.classList.add('visible');
 
     currentLevel  = levelIdx;
@@ -1530,6 +1598,11 @@
     enemies = [];
     coins.forEach(c => scene.remove(c.mesh));
     coins = [];
+    bullets.forEach(b => scene.remove(b.mesh));
+    bullets = [];
+    tracers.forEach(t => scene.remove(t.mesh));
+    tracers = [];
+    shootCooldown = 0;
     if (playerMesh) scene.remove(playerMesh);
 
     buildWorld();
@@ -1567,6 +1640,7 @@
     // Always go back to level select
     hudEl.classList.remove('visible');
     minimapCanvas.classList.remove('visible');
+    if (crosshairEl) crosshairEl.classList.remove('visible');
     if (levelBar) levelBar.classList.remove('visible');
 
     if (currentLevel + 1 >= LEVELS.length) {
@@ -1593,6 +1667,7 @@
     levelComplete = false;
     hudEl.classList.remove('visible');
     minimapCanvas.classList.remove('visible');
+    if (crosshairEl) crosshairEl.classList.remove('visible');
     if (levelBar) levelBar.classList.remove('visible');
 
     totalScore += Math.floor(score);
@@ -1638,6 +1713,7 @@
     updatePlayer(dt);
     updateEnemies(dt);
     updateCoins(dt);
+    updateBullets(dt);
     updateDecorations(dt);
     updateCamera(dt);
     updateHUD(dt);
@@ -1721,7 +1797,8 @@
     }
 
     playerMesh.position.set(player.x, player.y, player.z);
-    playerMesh.rotation.y = player.angle;
+    // Face the mesh toward camera direction (mouse), not keyboard movement
+    playerMesh.rotation.y = cameraYaw + Math.PI;
 
     // Landing
     const justLanded = playerOnGround && !wasOnGround;
@@ -2018,6 +2095,191 @@
   }
 
   // ═══════════════════════════════════════════════════════════
+  //  M16 SHOOTING SYSTEM
+  // ═══════════════════════════════════════════════════════════
+
+  function shootM16() {
+    if (shootCooldown > 0) return;
+    shootCooldown = SHOOT_COOLDOWN;
+
+    // Play sound
+    if (shootSound) {
+      const s = shootSound.cloneNode();
+      s.volume = 0.4;
+      s.play().catch(() => {});
+    } else {
+      // Web Audio fallback — short burst noise
+      try {
+        const actx = new (window.AudioContext || window.webkitAudioContext)();
+        const bufferSize = actx.sampleRate * 0.06;
+        const buffer = actx.createBuffer(1, bufferSize, actx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufferSize, 3);
+        const src = actx.createBufferSource();
+        src.buffer = buffer;
+        const gain = actx.createGain();
+        gain.gain.value = 0.3;
+        src.connect(gain).connect(actx.destination);
+        src.start();
+      } catch(e) {}
+    }
+
+    // Muzzle flash
+    if (muzzleFlashMesh) {
+      muzzleFlashMesh.material.opacity = 0.9;
+      muzzleFlashTimer = MUZZLE_FLASH_TIME;
+    }
+
+    // Calculate bullet direction from camera/mouse yaw
+    const dirX = Math.sin(cameraYaw);
+    const dirZ = Math.cos(cameraYaw);
+    const startY = player.y + 1.3; // chest height
+
+    // Create bullet (small sphere)
+    const bulletGeo = new THREE.SphereGeometry(0.08, 4, 4);
+    const bulletMat = new THREE.MeshBasicMaterial({ color: 0xffdd44 });
+    const bulletMesh = new THREE.Mesh(bulletGeo, bulletMat);
+    bulletMesh.position.set(player.x + dirX * 1.0, startY, player.z + dirZ * 1.0);
+    scene.add(bulletMesh);
+
+    // Tracer line
+    const tracerGeo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(dirX * 3, 0, dirZ * 3)
+    ]);
+    const tracerMat = new THREE.LineBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.6 });
+    const tracerLine = new THREE.Line(tracerGeo, tracerMat);
+    tracerLine.position.copy(bulletMesh.position);
+    scene.add(tracerLine);
+    tracers.push({ mesh: tracerLine, timer: TRACER_LIFETIME });
+
+    bullets.push({
+      mesh: bulletMesh,
+      x: bulletMesh.position.x,
+      y: startY,
+      z: bulletMesh.position.z,
+      dx: dirX,
+      dz: dirZ,
+      dist: 0
+    });
+  }
+
+  function updateBullets(dt) {
+    // Shoot cooldown
+    if (shootCooldown > 0) shootCooldown -= dt;
+
+    // Muzzle flash fade
+    if (muzzleFlashTimer > 0) {
+      muzzleFlashTimer -= dt;
+      if (muzzleFlashTimer <= 0 && muzzleFlashMesh) {
+        muzzleFlashMesh.material.opacity = 0;
+      }
+    }
+
+    // Update tracers
+    for (let i = tracers.length - 1; i >= 0; i--) {
+      tracers[i].timer -= dt;
+      tracers[i].mesh.material.opacity = tracers[i].timer / TRACER_LIFETIME * 0.6;
+      if (tracers[i].timer <= 0) {
+        scene.remove(tracers[i].mesh);
+        tracers.splice(i, 1);
+      }
+    }
+
+    // Update bullets
+    for (let i = bullets.length - 1; i >= 0; i--) {
+      const b = bullets[i];
+      const move = BULLET_SPEED * dt;
+      b.x += b.dx * move;
+      b.z += b.dz * move;
+      b.dist += move;
+      b.mesh.position.set(b.x, b.y, b.z);
+
+      let hit = false;
+
+      // Check hit against enemies
+      for (let j = enemies.length - 1; j >= 0; j--) {
+        const e = enemies[j];
+        const ex = b.x - e.x, ez = b.z - e.z;
+        const edist = Math.sqrt(ex * ex + ez * ez);
+        if (edist < 1.2 && Math.abs(b.y - (e.y + 1.0)) < 1.5) {
+          // Hit!
+          hit = true;
+          if (e.hp === undefined) e.hp = ENEMY_HP;
+          e.hp -= BULLET_DAMAGE;
+
+          // Flash enemy red
+          e.mesh.traverse(child => {
+            if (child.isMesh && child.material) {
+              const origColor = child.material.color.getHex();
+              child.material.emissive = new THREE.Color(0xff0000);
+              child.material.emissiveIntensity = 0.8;
+              setTimeout(() => {
+                if (child.material) {
+                  child.material.emissive = new THREE.Color(0x000000);
+                  child.material.emissiveIntensity = 0;
+                }
+              }, 150);
+            }
+          });
+
+          if (e.hp <= 0) {
+            killEnemy(j);
+          }
+          break;
+        }
+      }
+
+      // Check hit against buildings (stop bullet)
+      if (!hit) {
+        for (const bld of buildings) {
+          if (Math.abs(b.x - bld.x) < bld.hw && Math.abs(b.z - bld.z) < bld.hd) {
+            hit = true;
+            break;
+          }
+        }
+      }
+
+      // Remove bullet if hit or too far
+      if (hit || b.dist > BULLET_MAX_DIST || Math.abs(b.x) > HALF_WORLD || Math.abs(b.z) > HALF_WORLD) {
+        scene.remove(b.mesh);
+        bullets.splice(i, 1);
+      }
+    }
+  }
+
+  function killEnemy(index) {
+    const e = enemies[index];
+
+    // Death effect — small explosion of particles
+    const particleCount = 8;
+    for (let p = 0; p < particleCount; p++) {
+      const pg = new THREE.Mesh(
+        new THREE.SphereGeometry(0.12, 4, 4),
+        new THREE.MeshBasicMaterial({ color: e.type === 'krabs' ? 0xff6600 : 0xff3366, transparent: true, opacity: 0.8 })
+      );
+      pg.position.set(e.x, e.y + 1, e.z);
+      scene.add(pg);
+      const angle = (p / particleCount) * Math.PI * 2;
+      const speed = 3 + Math.random() * 3;
+      const vy = 3 + Math.random() * 4;
+      const particle = { mesh: pg, vx: Math.cos(angle) * speed, vy, vz: Math.sin(angle) * speed, life: 0.6 };
+      decorations.push({
+        mesh: pg,
+        type: 'deathParticle',
+        vx: particle.vx, vy: particle.vy, vz: particle.vz,
+        life: particle.life
+      });
+    }
+
+    scene.remove(e.mesh);
+    enemies.splice(index, 1);
+    score += 100;  // bonus for killing
+    showMessage('💀 ENEMY KILLED! +100', 1.5);
+    hudEnemies.textContent = enemies.length;
+  }
+
+  // ═══════════════════════════════════════════════════════════
   //  UPDATE — Camera
   // ═══════════════════════════════════════════════════════════
 
@@ -2216,6 +2478,15 @@
   document.addEventListener('mousemove', (e) => {
     if (document.pointerLockElement !== renderer.domElement) return;
     cameraYaw -= e.movementX * MOUSE_SENSITIVITY;
+  });
+
+  // ── Shooting with left mouse button ──
+  document.addEventListener('mousedown', (e) => {
+    if (!gameRunning) return;
+    if (document.pointerLockElement !== renderer.domElement) return;
+    if (e.button === 0) {  // Left click
+      shootM16();
+    }
   });
 
   function requestPointerLock() {
