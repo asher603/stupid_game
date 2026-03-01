@@ -204,7 +204,7 @@
   // ─────────────────────────────────────
 
   // Audio
-  let bgm, jumpSound, landSound, stepSound;
+  let bgm, jumpSound, landSound, stepSound, throwCoinSound;
   let patrickShouts = [];
   let krabsShouts   = [];
   let lastShoutTime = -2.0;
@@ -325,6 +325,9 @@
     jumpSound = new Audio('sounds/jump.mp3');
     landSound = new Audio('sounds/player_landing.mp3');
 
+    throwCoinSound = new Audio('sounds/take_this_coin.mp3');
+    throwCoinSound.volume = 0.8;
+
     stepSound = new Audio('sounds/player_steps.mp3');
     stepSound.loop = true;
     stepSound.volume = 0.6;
@@ -335,10 +338,12 @@
       patrickShouts.push(a);
     });
 
-    // Mr. Krabs shouts — add files & uncomment:
-    // ['krabs_shout1.mp3'].forEach(f => {
-    //   const a = new Audio(`sounds/${f}`); a.volume = 0.8; krabsShouts.push(a);
-    // });
+    
+    ['i_hate_your_resturant.mp3', 'if_you_get_any_closer.mp3', 'your_eyes_look_like_pipes.mp3'].forEach(f => {
+      const a = new Audio(`sounds/${f}`);
+      a.volume = 0.8;
+      krabsShouts.push(a);
+     });
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -745,6 +750,12 @@
       showMessage('🚫 NO COINS TO THROW!', 1.5);
       return;
     }
+
+    if (throwCoinSound) {
+    throwCoinSound.currentTime = 0; // Rewind to start for quick replay (if player throws multiple coins rapidly)
+    throwCoinSound.play().catch(e => console.log("Sound error:", e));
+  }
+
     playerCoins--;
     score = Math.max(0, score - COIN_SCORE);
 
