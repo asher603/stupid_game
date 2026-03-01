@@ -1637,7 +1637,10 @@
     }
 
     const canSprint = sprinting && stamina > 0;
-    if (runAction) runAction.timeScale = canSprint ? 2.0 : 1.0;
+    const isMovingBackward = inputForward < 0;
+    if (runAction) runAction.timeScale = isMovingBackward
+      ? (canSprint ? -2.0 : -1.0)
+      : (canSprint ?  2.0 :  1.0);
     const playerBoost = 1 + currentLevel * PLAYER_SPEED_BOOST;
     const speed = (canSprint ? SPRINT_SPEED : PLAYER_SPEED) * playerBoost * dt;
 
@@ -1664,7 +1667,10 @@
       const len = Math.sqrt(moveX * moveX + moveZ * moveZ);
       moveX /= len; moveZ /= len;
 
-      player.angle = lerpAngle(player.angle, Math.atan2(moveX, moveZ), 5 * dt);
+      const targetAngle = isMovingBackward
+        ? Math.atan2(-moveX, -moveZ)   // face opposite of movement (forward)
+        : Math.atan2(moveX, moveZ);     // face movement direction
+      player.angle = lerpAngle(player.angle, targetAngle, 5 * dt);
 
       let nx = player.x + moveX * speed;
       let nz = player.z + moveZ * speed;
