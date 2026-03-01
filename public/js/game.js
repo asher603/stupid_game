@@ -209,6 +209,8 @@
   let krabsShouts   = [];
   let lastShoutTime = -2.0;
 
+  let currentVoiceLine = null;
+
   // Three.js
   let scene, camera, renderer, clock;
   let cameraHeight = CAMERA_HEIGHT_DEFAULT;
@@ -752,9 +754,8 @@
     }
 
     if (throwCoinSound) {
-    throwCoinSound.currentTime = 0; // Rewind to start for quick replay (if player throws multiple coins rapidly)
-    throwCoinSound.play().catch(e => console.log("Sound error:", e));
-  }
+    playVoiceSafe(throwCoinSound);
+    }
 
     playerCoins--;
     score = Math.max(0, score - COIN_SCORE);
@@ -1071,11 +1072,15 @@
       const d = Math.sqrt((player.x - e.x) ** 2 + (player.z - e.z) ** 2);
       if (d < nearestDist) { nearestDist = d; nearestEnemy = e; }
     }
+    
     if (nearestEnemy && nearestDist < SHOUT_RANGE && (gameTime - lastShoutTime) >= SHOUT_COOLDOWN) {
       const shouts = nearestEnemy.type === 'krabs' ? krabsShouts : patrickShouts;
       if (shouts.length > 0) {
         const s = shouts[Math.floor(Math.random() * shouts.length)];
-        if (s) { s.currentTime = 0; s.play().catch(() => {}); lastShoutTime = gameTime; }
+        if (s) {
+          playVoiceSafe(s);
+          lastShoutTime = gameTime;
+        }
       }
     }
 
@@ -1459,6 +1464,18 @@
   // ═══════════════════════════════════════════════════════════
   //  HELPERS
   // ═══════════════════════════════════════════════════════════
+
+  function playVoiceSafe(audio) {
+  // if theres already a voice line playing, don't interrupt it with a new one
+  if (currentVoiceLine && !currentVoiceLine.paused) {
+    return; 
+  }
+
+  // if not, play the new voice line
+  currentVoiceLine = audio;
+  currentVoiceLine.currentTime = 0;
+  currentVoiceLine.play().catch(e => console.log("Audio play blocked:", e));
+  }
 
   function lerpAngle(a, b, t) {
     let diff = b - a;
