@@ -21,7 +21,8 @@
   const STAMINA_DRAIN = 30;
   const STAMINA_REGEN = 20;
 
-  const ENEMY_BASE_SPEED     = 5;
+  const PATRICK_BASE_SPEED     = 4;
+  const MR_KRABS_BASE_SPEED   = 6;
   const ENEMY_CATCH_DIST     = 0.8;
   const ENEMY_SPAWN_INTERVAL = 12;
   const MAX_ENEMIES          = 15;
@@ -318,11 +319,6 @@
       camera.updateProjectionMatrix();
       renderer.setSize(innerWidth, innerHeight);
     });
-
-    // Sounds
-    bgm = new Audio('sounds/bgm.mp3');
-    bgm.loop = true;
-    bgm.volume = 0.4;
 
     jumpSound = new Audio('sounds/jump.mp3');
     landSound = new Audio('sounds/player_landing.mp3');
@@ -692,6 +688,7 @@
     } else if (type === 'krabs' && krabsModel) {
       const mesh = THREE.SkeletonUtils.clone(krabsModel);
       mesh.rotation.y = Math.PI / 2;
+      mesh.position.y = 0.7;
       group.add(mesh);
       mixer = new THREE.AnimationMixer(mesh);
 
@@ -705,9 +702,19 @@
 
     scene.add(group);
 
+    let baseSpeed;
+    switch (type) {
+      case 'patrick':
+        baseSpeed = PATRICK_BASE_SPEED;
+        break;
+      case 'krabs':
+        baseSpeed = MR_KRABS_BASE_SPEED;
+        break;
+    }
+
     enemies.push({
       mesh: group, type, x, y: 0, z,
-      speed: ENEMY_BASE_SPEED * (0.8 + Math.random() * 0.4) * difficultyMul,
+      speed: baseSpeed * (0.8 + Math.random() * 0.4) * difficultyMul,
       angle: 0, stuckTimer: 0, avoidAngle: 0,
       mixer, runAction: eRunAction, attackAction: eAttackAction,
       jumpAction: eJumpAction, currentAction: eCurrAction,
@@ -834,6 +841,16 @@
   function startLevel() {
     const lvl = getLvl();
 
+    if (bgm) {
+    bgm.pause();
+    bgm.currentTime = 0;
+    }
+
+    // add 1 because bgm files are 1-indexed (bgm_lvl1, bgm_lvl2, etc.)
+    bgm = new Audio(`sounds/bgm_lvl${currentLevel + 1}.mp3`);
+    bgm.loop = true;
+    bgm.volume = 0.4;
+
     gameTime       = 0;
     score          = 0;
     stamina        = STAMINA_MAX;
@@ -842,6 +859,12 @@
     messageTimer   = 0;
     lastShoutTime  = -2.0;
     levelComplete  = false;
+
+    if (bgm) { 
+    bgm.play().catch(() => {
+      console.log('Autoplay prevented, waiting for user interaction to start music.');
+    }); 
+  }
 
     // Clean
     enemies.forEach(e => scene.remove(e.mesh));
@@ -1167,7 +1190,7 @@
 
     const prevX = enemy.x, prevZ = enemy.z;
     let eSpeed = enemy.speed * Math.min(difficultyMul, 3) * dt;
-    if (enemy.isAttacking) eSpeed *= 2.5;
+    if (enemy.isAttacking) eSpeed *= 2.0;
 
     let ex = enemy.x + (dx + avoidX * 0.3) * eSpeed;
     let ez = enemy.z + (dz + avoidZ * 0.3) * eSpeed;
