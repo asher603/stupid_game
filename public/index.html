@@ -8,8 +8,9 @@
   <link rel="icon" type="image/png" href="spongebob.png">
 </head>
 <body>
-  <!-- HUD Overlay -->
-  <div id="hud"><body>
+
+  <!-- HUD -->
+  <div id="hud">
     <div id="hud-left">
       <div class="hud-item">
         <span class="hud-label">TIME</span>
@@ -18,6 +19,10 @@
       <div class="hud-item">
         <span class="hud-label">SCORE</span>
         <span id="hud-score" class="hud-value">0</span>
+      </div>
+      <div class="hud-item">
+        <span class="hud-label">COINS</span>
+        <span id="hud-coins" class="hud-value">0</span>
       </div>
     </div>
     <div id="hud-center">
@@ -37,8 +42,24 @@
     </div>
   </div>
 
-  <!-- Start / Game Over Screen -->
+  <!-- Level Progress Bar -->
+  <div id="level-bar">
+    <div id="level-bar-left">
+      <span id="hud-level">LEVEL 1</span>
+      <span id="hud-level-name"></span>
+    </div>
+    <div id="level-bar-right">
+      <span id="hud-target">0/500</span>
+    </div>
+    <div id="level-progress-track">
+      <div id="level-progress-fill"></div>
+    </div>
+  </div>
+
+  <!-- Overlay (Start / Game Over / How to Play) -->
   <div id="overlay" class="active">
+
+    <!-- Main Menu -->
     <div id="overlay-content">
       <img src="spongebob.png" alt="SpongeBob" class="overlay-logo">
       <h1>SpongeBob <span class="accent">RUN!</span></h1>
@@ -48,17 +69,70 @@
         <span id="final-score-value">0</span>
       </div>
       <button id="btn-start">START GAME</button>
+      <button id="btn-how-to-play">HOW TO PLAY</button>
       <div class="controls-hint">
         <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or <kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd> — Move</p>
-        <p><kbd>SHIFT</kbd> — Sprint &nbsp;&nbsp; <kbd>SPACE</kbd> — Jump</p>
+        <p><kbd>SHIFT</kbd> — Sprint &nbsp;&nbsp; <kbd>SPACE</kbd> — Jump &nbsp;&nbsp; <kbd>C</kbd> — Throw Coin</p>
       </div>
+    </div>
+
+    <!-- How to Play Screen -->
+    <div id="how-to-play-screen" class="hidden">
+      <h2>How to Play</h2>
+
+      <div class="htp-section">
+        <h3>🎮 Controls</h3>
+        <div class="htp-grid">
+          <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / <kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd> — Move</p>
+          <p><kbd>SHIFT</kbd> — Sprint (uses stamina)</p>
+          <p><kbd>SPACE</kbd> — Jump</p>
+          <p><kbd>C</kbd> — Throw a coin behind you</p>
+          <p><kbd>Q</kbd> / <kbd>E</kbd> — Raise / Lower camera</p>
+        </div>
+      </div>
+
+      <div class="htp-section">
+        <h3>🎯 Goal</h3>
+        <p>Survive as long as possible! Your score increases over time.<br>
+        Collect golden coins for <strong>+50</strong> bonus points each.</p>
+      </div>
+
+      <div class="htp-section">
+        <h3>👾 Enemies</h3>
+        <p><span class="enemy-patrick">Patrick</span> — Chases you directly. Watch out for his dash attack!</p>
+        <p><span class="enemy-krabs">Mr. Krabs</span> — Attracted to the nearest <strong>coin</strong> or <strong>you</strong> (whichever is closer). Stops briefly after grabbing a coin.</p>
+      </div>
+
+      <div class="htp-section">
+        <h3>💡 Strategy</h3>
+        <p>Press <kbd>C</kbd> to throw a coin behind you to distract Mr. Krabs!<br>
+        (Costs 1 coin and 50 points)</p>
+        <p>Use buildings and trees as cover. Manage your stamina wisely — don't sprint all the time!</p>
+      </div>
+
+      <button id="btn-htp-back">BACK</button>
+    </div>
+
+  </div>
+
+  <!-- Level Complete Overlay -->
+  <div id="level-complete-overlay">
+    <div id="level-complete-content">
+      <div id="lc-icon">&#127942;</div>
+      <h2>LEVEL COMPLETE!</h2>
+      <p id="lc-level-name">Bikini Bottom — Night</p>
+      <div id="lc-score-box">
+        <span class="score-label">LEVEL SCORE</span>
+        <span id="lc-score-value">0</span>
+      </div>
+      <button id="btn-next-level">NEXT LEVEL</button>
     </div>
   </div>
 
   <!-- Minimap -->
   <canvas id="minimap" width="160" height="160"></canvas>
 
-  <!-- Three.js from CDN -->
+  <!-- Three.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/SkeletonUtils.js"></script>

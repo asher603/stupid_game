@@ -307,3 +307,287 @@ kbd {
   opacity: 1;
 }
 
+/* ── Level Progress Bar ── */
+
+#level-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 20px 10px;
+  pointer-events: none;
+  z-index: 10;
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+
+#level-bar.visible {
+  opacity: 1;
+}
+
+#level-bar-left, #level-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#hud-level {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--accent);
+  text-transform: uppercase;
+}
+
+#hud-level-name {
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+}
+
+#hud-target {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent-yellow);
+  letter-spacing: 1px;
+}
+
+#level-progress-track {
+  width: 100%;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+#level-progress-fill {
+  width: 0%;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-yellow));
+  border-radius: 3px;
+  transition: width 0.3s ease;
+  box-shadow: 0 0 8px rgba(0, 212, 255, 0.4);
+}
+
+/* ── Level Complete Overlay ── */
+
+#level-complete-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 5, 12, 0.92);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 110;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.5s;
+}
+
+#level-complete-overlay.active {
+  opacity: 1;
+  pointer-events: all;
+}
+
+#level-complete-content {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  animation: fadeUp 0.6s ease-out;
+}
+
+#lc-icon {
+  font-size: 64px;
+  filter: drop-shadow(0 0 20px rgba(255, 204, 0, 0.5));
+}
+
+#level-complete-content h2 {
+  font-size: 36px;
+  font-weight: 800;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: var(--accent-yellow);
+  text-shadow: 0 0 20px rgba(255, 204, 0, 0.4);
+}
+
+#lc-level-name {
+  font-size: 16px;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+}
+
+#lc-score-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 204, 0, 0.05);
+  border: 1px solid rgba(255, 204, 0, 0.2);
+  border-radius: 12px;
+  padding: 16px 40px;
+}
+
+#lc-score-value {
+  font-family: var(--font-mono);
+  font-size: 48px;
+  font-weight: 800;
+  color: var(--accent-yellow);
+  text-shadow: 0 0 20px rgba(255, 204, 0, 0.3);
+}
+
+#btn-next-level {
+  font-family: var(--font);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  padding: 14px 48px;
+  border: 2px solid var(--accent-green);
+  border-radius: 8px;
+  background: rgba(0, 255, 136, 0.08);
+  color: var(--accent-green);
+  cursor: pointer;
+  transition: all 0.2s;
+  outline: none;
+  margin-top: 8px;
+}
+
+#btn-next-level:hover {
+  background: var(--accent-green);
+  color: #000;
+  box-shadow: 0 0 30px rgba(0, 255, 136, 0.3);
+}
+
+/* ── Coins HUD ── */
+
+#hud-coins {
+  color: var(--accent-yellow);
+}
+
+/* ── Generic hidden utility ── */
+
+.hidden {
+  display: none !important;
+}
+
+/* ── How to Play Screen ── */
+
+#how-to-play-screen {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  max-width: 520px;
+  max-height: 80vh;
+  overflow-y: auto;
+  animation: fadeUp 0.6s ease-out;
+  padding: 10px;
+}
+
+#how-to-play-screen h2 {
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+#how-to-play-screen h3 {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--accent-yellow);
+  margin-bottom: 6px;
+}
+
+.htp-section {
+  background: var(--hud-bg);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--hud-border);
+  border-radius: 10px;
+  padding: 14px 20px;
+  width: 100%;
+  text-align: left;
+}
+
+.htp-section p {
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.9;
+}
+
+.htp-section strong {
+  color: var(--accent-yellow);
+}
+
+.htp-grid p {
+  font-size: 12px;
+  line-height: 2;
+}
+
+.enemy-patrick {
+  color: #ff6699;
+  font-weight: 700;
+}
+
+.enemy-krabs {
+  color: #ff8800;
+  font-weight: 700;
+}
+
+#btn-how-to-play {
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  padding: 10px 32px;
+  border: 1px solid var(--accent-yellow);
+  border-radius: 8px;
+  background: rgba(255, 204, 0, 0.08);
+  color: var(--accent-yellow);
+  cursor: pointer;
+  transition: all 0.2s;
+  outline: none;
+}
+
+#btn-how-to-play:hover {
+  background: var(--accent-yellow);
+  color: #000;
+  box-shadow: 0 0 20px rgba(255, 204, 0, 0.3);
+}
+
+#btn-htp-back {
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  padding: 10px 32px;
+  border: 1px solid var(--text-dim);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.2s;
+  outline: none;
+  margin-top: 4px;
+}
+
+#btn-htp-back:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: var(--text);
+}
