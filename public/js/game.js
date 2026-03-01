@@ -316,11 +316,14 @@
   // Input
   const keys = {};
   let cameraYaw = 0;           // Horizontal look angle (mouse)
-  let MOUSE_SENSITIVITY = 0.002;
+  let cameraPitch = 0;         // Vertical look angle (mouse)
+  const PITCH_LIMIT = Math.PI / 2 - 0.05;  // Almost 90° up/down
+  let MOUSE_SENSITIVITY = 0.0005;
 
   // Settings
-  let povMode = 'third';       // 'third' or 'first'
+  let povMode = 'first';       // 'third' or 'first'
   const FP_EYE_HEIGHT = 2.0;   // First-person eye height above player.y
+  let fpGunMesh = null;        // Separate gun mesh attached to camera for FPS view
 
   // ─────────────────────────────────────
   //  DOM ELEMENTS
@@ -1285,30 +1288,40 @@
       if (idleAction) { idleAction.play(); currentAction = idleAction; }
     }, undefined, (err) => console.error('Error loading SpongeBob:', err));
 
-    // Attach M16 to player
+    // Attach M16 to player (third-person) + create FPS gun for camera
     const gunLoader = new THREE.GLTFLoader();
     gunLoader.load('models/m16.glb', (gltf) => {
+      // ── Third-person gun (attached to playerMesh) ──
       m16Mesh = gltf.scene;
-      // Scale & position the gun at the player's right side
       const bbox = new THREE.Box3().setFromObject(m16Mesh);
       const size = bbox.getSize(new THREE.Vector3());
       const s = 1.2 / (size.y || 1);
       m16Mesh.scale.set(s, s, s);
-      m16Mesh.position.set(0.5, 1.2, -0.4);  // right side, chest height, slightly forward
-      m16Mesh.rotation.set(0, Math.PI, 0);    // flip to face same direction as player
+      m16Mesh.position.set(0.5, 1.2, -0.4);
+      m16Mesh.rotation.set(0, Math.PI, 0);
       m16Mesh.traverse(child => {
         if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; }
       });
       playerMesh.add(m16Mesh);
 
-      // Muzzle flash (attached to gun barrel tip)
+      // Muzzle flash (third-person)
       const flashGeo = new THREE.SphereGeometry(0.15, 6, 6);
       const flashMat = new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0 });
       muzzleFlashMesh = new THREE.Mesh(flashGeo, flashMat);
-      muzzleFlashMesh.position.set(0, 0.1, -0.8); // tip of barrel
+      muzzleFlashMesh.position.set(0, 0.1, -0.8);
       m16Mesh.add(muzzleFlashMesh);
 
-      console.log('M16 loaded and attached to player');
+      // ── First-person gun (attached to camera) ──
+      fpGunMesh = m16Mesh.clone(true);
+      fpGunMesh.scale.set(s * 1.2, s * 1.2, s * 1.2);
+      fpGunMesh.position.set(0.35, -0.3, -0.6);   // right-lower-front in camera space
+      fpGunMesh.rotation.set(0, Math.PI, 0);
+      camera.add(fpGunMesh);
+      scene.add(camera);  // camera must be in scene graph to render children
+
+      fpGunMesh.visible = (povMode === 'first');
+
+      console.log('M16 loaded and attached to player + camera');
     }, undefined, (err) => console.error('Error loading M16:', err));
 
     player = { x: 0, y: 0, z: 0, angle: 0 };
@@ -2130,9 +2143,10 @@
       muzzleFlashTimer = MUZZLE_FLASH_TIME;
     }
 
-    // Calculate bullet direction from camera/mouse yaw
-    const dirX = Math.sin(cameraYaw);
-    const dirZ = Math.cos(cameraYaw);
+    // Calculate bullet direction from camera yaw + pitch
+    const dirX = Math.sin(cameraYaw) * Math.cos(cameraPitch);
+    const dirY = Math.sin(cameraPitch);
+    const dirZ = Math.cos(cameraYaw) * Math.cos(cameraPitch);
     const startY = player.y + 1.3; // chest height
 
     // Create bullet (small sphere)
@@ -2159,6 +2173,7 @@
       y: startY,
       z: bulletMesh.position.z,
       dx: dirX,
+      dy: dirY,
       dz: dirZ,
       dist: 0
     });
@@ -2191,9 +2206,17 @@
       const b = bullets[i];
       const move = BULLET_SPEED * dt;
       b.x += b.dx * move;
+      b.y += (b.dy || 0) * move;
       b.z += b.dz * move;
       b.dist += move;
       b.mesh.position.set(b.x, b.y, b.z);
+
+      // Remove if bullet goes below ground or too high
+      if (b.y < 0 || b.y > 50) {
+        scene.remove(b.mesh);
+        bullets.splice(i, 1);
+        continue;
+      }
 
       let hit = false;
 
@@ -2288,15 +2311,22 @@
       // First-person: camera at player's eyes, looking forward
       const eyePos = new THREE.Vector3(player.x, player.y + FP_EYE_HEIGHT, player.z);
       camera.position.copy(eyePos);
+
+      // Look direction based on yaw + pitch
       const lookTarget = new THREE.Vector3(
-        player.x + Math.sin(cameraYaw),
-        player.y + FP_EYE_HEIGHT,
-        player.z + Math.cos(cameraYaw)
+        player.x + Math.sin(cameraYaw) * Math.cos(cameraPitch),
+        player.y + FP_EYE_HEIGHT + Math.sin(cameraPitch),
+        player.z + Math.cos(cameraYaw) * Math.cos(cameraPitch)
       );
       camera.lookAt(lookTarget);
 
-      // Hide player mesh in first person
+      // Hide player body but show gun attached to camera
       if (playerMesh) playerMesh.visible = false;
+
+      // Show FPS gun model attached to camera
+      if (fpGunMesh) {
+        fpGunMesh.visible = true;
+      }
     } else {
       // Third-person: orbiting camera
       if (keys['KeyQ']) cameraHeight = Math.min(CAMERA_HEIGHT_MAX, cameraHeight + CAMERA_HEIGHT_SPEED * dt);
@@ -2311,8 +2341,9 @@
       camera.position.lerp(idealTarget.clone().add(idealOffset), CAMERA_LERP * dt);
       camera.lookAt(new THREE.Vector3(player.x, player.y + 1.5, player.z));
 
-      // Show player mesh in third person
+      // Show player mesh in third person, hide FPS gun
       if (playerMesh) playerMesh.visible = true;
+      if (fpGunMesh) fpGunMesh.visible = false;
     }
   }
 
@@ -2478,6 +2509,8 @@
   document.addEventListener('mousemove', (e) => {
     if (document.pointerLockElement !== renderer.domElement) return;
     cameraYaw -= e.movementX * MOUSE_SENSITIVITY;
+    cameraPitch -= e.movementY * MOUSE_SENSITIVITY;
+    cameraPitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, cameraPitch));
   });
 
   // ── Shooting with left mouse button ──
@@ -2535,6 +2568,9 @@
 
   // Sensitivity slider
   if (sensitivitySlider) {
+    sensitivitySlider.value = '1';
+    MOUSE_SENSITIVITY = 1 / 2000;
+    if (sensitivityValue) sensitivityValue.textContent = '1.0';
     sensitivitySlider.addEventListener('input', () => {
       const val = parseFloat(sensitivitySlider.value);
       MOUSE_SENSITIVITY = val / 2000;   // range 1-20 → 0.0005 – 0.01
