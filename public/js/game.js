@@ -57,6 +57,13 @@
   const MUZZLE_FLASH_TIME = 0.06;
   const TRACER_LIFETIME   = 0.15;
 
+  // Ammo / Magazine
+  const MAG_SIZE          = 30;     // Bullets per magazine
+  const MAX_MAGAZINES     = 3;      // Starting magazines
+  const RELOAD_TIME       = 2.5;    // Seconds to reload
+  const AMMO_PICKUP_COUNT = 5;      // Ammo pickups on map per level
+  const AMMO_PICKUP_RESPAWN = 15000; // ms to respawn pickup
+
   // Player boost per level (stacks)
   const PLAYER_SPEED_BOOST  = 0.08;   // +8% speed per level
   const PLAYER_JUMP_BOOST   = 0.06;   // +6% jump per level
@@ -313,6 +320,13 @@
   let tracers       = [];   // { mesh, timer }
   let shootSound    = null;
 
+  // Ammo
+  let ammoInMag     = MAG_SIZE;     // Current bullets in magazine
+  let magazines     = MAX_MAGAZINES; // Spare magazines
+  let isReloading   = false;
+  let reloadTimer   = 0;
+  let ammoPickups   = [];            // { mesh, x, z, collected }
+
   // Input
   const keys = {};
   let cameraYaw = 0;           // Horizontal look angle (mouse)
@@ -321,9 +335,8 @@
   let MOUSE_SENSITIVITY = 0.0005;
 
   // Settings
-  let povMode = 'first';       // 'third' or 'first'
   const FP_EYE_HEIGHT = 2.0;   // First-person eye height above player.y
-  let fpGunMesh = null;        // Separate gun mesh attached to camera for FPS view
+  let fpGunMesh = null;        // Gun mesh attached to camera for FPS view
 
   // ─────────────────────────────────────
   //  DOM ELEMENTS
@@ -1288,40 +1301,42 @@
       if (idleAction) { idleAction.play(); currentAction = idleAction; }
     }, undefined, (err) => console.error('Error loading SpongeBob:', err));
 
-    // Attach M16 to player (third-person) + create FPS gun for camera
+    // Load M16 and attach to camera for FPS view
     const gunLoader = new THREE.GLTFLoader();
     gunLoader.load('models/m16.glb', (gltf) => {
-      // ── Third-person gun (attached to playerMesh) ──
-      m16Mesh = gltf.scene;
-      const bbox = new THREE.Box3().setFromObject(m16Mesh);
+      const gunScene = gltf.scene;
+      const bbox = new THREE.Box3().setFromObject(gunScene);
       const size = bbox.getSize(new THREE.Vector3());
-      const s = 1.2 / (size.y || 1);
-      m16Mesh.scale.set(s, s, s);
-      m16Mesh.position.set(0.5, 1.2, -0.4);
-      m16Mesh.rotation.set(0, Math.PI, 0);
-      m16Mesh.traverse(child => {
-        if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; }
-      });
-      playerMesh.add(m16Mesh);
+      const s = 1.5 / (size.y || 1);
 
-      // Muzzle flash (third-person)
-      const flashGeo = new THREE.SphereGeometry(0.15, 6, 6);
-      const flashMat = new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0 });
-      muzzleFlashMesh = new THREE.Mesh(flashGeo, flashMat);
-      muzzleFlashMesh.position.set(0, 0.1, -0.8);
-      m16Mesh.add(muzzleFlashMesh);
-
-      // ── First-person gun (attached to camera) ──
-      fpGunMesh = m16Mesh.clone(true);
-      fpGunMesh.scale.set(s * 1.2, s * 1.2, s * 1.2);
-      fpGunMesh.position.set(0.35, -0.3, -0.6);   // right-lower-front in camera space
+      // FPS gun — positioned in bottom-right of camera view
+      fpGunMesh = gunScene;
+      fpGunMesh.scale.set(s, s, s);
+      fpGunMesh.position.set(0.4, -0.35, -0.7);   // right, down, forward
       fpGunMesh.rotation.set(0, Math.PI, 0);
+      fpGunMesh.traverse(child => {
+        if (child.isMesh) {
+          child.castShadow = false;
+          child.receiveShadow = false;
+          child.renderOrder = 999;            // render on top
+          child.material = child.material.clone();
+          child.material.depthTest = false;   // always visible
+        }
+      });
       camera.add(fpGunMesh);
-      scene.add(camera);  // camera must be in scene graph to render children
+      // camera must be in scene graph to render its children
+      if (!camera.parent) scene.add(camera);
 
-      fpGunMesh.visible = (povMode === 'first');
+      // Muzzle flash
+      const flashGeo = new THREE.SphereGeometry(0.12, 6, 6);
+      const flashMat = new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0, depthTest: false });
+      muzzleFlashMesh = new THREE.Mesh(flashGeo, flashMat);
+      muzzleFlashMesh.renderOrder = 1000;
+      muzzleFlashMesh.position.set(0, 0.05, -0.9); // barrel tip
+      fpGunMesh.add(muzzleFlashMesh);
 
-      console.log('M16 loaded and attached to player + camera');
+      fpGunMesh.visible = true;
+      console.log('M16 loaded — FPS mode');
     }, undefined, (err) => console.error('Error loading M16:', err));
 
     player = { x: 0, y: 0, z: 0, angle: 0 };
@@ -1616,6 +1631,12 @@
     tracers.forEach(t => scene.remove(t.mesh));
     tracers = [];
     shootCooldown = 0;
+    ammoInMag = MAG_SIZE;
+    magazines = MAX_MAGAZINES;
+    isReloading = false;
+    reloadTimer = 0;
+    ammoPickups.forEach(a => scene.remove(a.mesh));
+    ammoPickups = [];
     if (playerMesh) scene.remove(playerMesh);
 
     buildWorld();
@@ -1625,6 +1646,7 @@
 
     for (let i = 0; i < lvl.initialEnemies; i++) spawnEnemy(i);
     for (let i = 0; i < lvl.coinCount; i++) spawnCoin();
+    for (let i = 0; i < AMMO_PICKUP_COUNT; i++) spawnAmmoPickup();
 
     hudEnemies.textContent = enemies.length;
     if (hudLevel) hudLevel.textContent = `LEVEL ${currentLevel + 1}`;
@@ -1727,6 +1749,8 @@
     updateEnemies(dt);
     updateCoins(dt);
     updateBullets(dt);
+    updateReload(dt);
+    updateAmmoPickups(dt);
     updateDecorations(dt);
     updateCamera(dt);
     updateHUD(dt);
@@ -2113,7 +2137,14 @@
 
   function shootM16() {
     if (shootCooldown > 0) return;
+    if (isReloading) return;
+    if (ammoInMag <= 0) {
+      // Auto-reload if we have spare mags
+      startReload();
+      return;
+    }
     shootCooldown = SHOOT_COOLDOWN;
+    ammoInMag--;
 
     // Play sound
     if (shootSound) {
@@ -2303,48 +2334,120 @@
   }
 
   // ═══════════════════════════════════════════════════════════
+  //  RELOAD & AMMO PICKUPS
+  // ═══════════════════════════════════════════════════════════
+
+  function startReload() {
+    if (isReloading) return;
+    if (magazines <= 0) {
+      showMessage('❌ NO MAGAZINES LEFT! Find ammo!', 2);
+      return;
+    }
+    if (ammoInMag === MAG_SIZE) return; // already full
+    isReloading = true;
+    reloadTimer = RELOAD_TIME;
+    showMessage('🔄 RELOADING...', RELOAD_TIME);
+  }
+
+  function updateReload(dt) {
+    if (!isReloading) return;
+    reloadTimer -= dt;
+    if (reloadTimer <= 0) {
+      isReloading = false;
+      magazines--;
+      ammoInMag = MAG_SIZE;
+      showMessage('✅ RELOADED!', 1);
+    }
+  }
+
+  function createAmmoPickupMesh() {
+    const group = new THREE.Group();
+    // Magazine box
+    const box = new THREE.Mesh(
+      new THREE.BoxGeometry(0.3, 0.6, 0.2),
+      new THREE.MeshStandardMaterial({ color: 0x556b2f, roughness: 0.5, metalness: 0.4 })
+    );
+    box.position.y = 0.3;
+    box.castShadow = true;
+    group.add(box);
+    // Glow ring
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.4, 0.55, 16),
+      new THREE.MeshBasicMaterial({ color: 0x44ff44, transparent: true, opacity: 0.4, side: THREE.DoubleSide })
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.05;
+    group.add(ring);
+    return group;
+  }
+
+  function spawnAmmoPickup() {
+    let x, z, att = 0;
+    do {
+      x = (Math.random() - 0.5) * (WORLD_SIZE - 12);
+      z = (Math.random() - 0.5) * (WORLD_SIZE - 12);
+      att++;
+    } while (att < 20 && isInsideBuilding(x, z));
+
+    const mesh = createAmmoPickupMesh();
+    mesh.position.set(x, 0, z);
+    scene.add(mesh);
+    ammoPickups.push({ mesh, x, z, collected: false });
+  }
+
+  function respawnAmmoPickup(pickup) {
+    let nx, nz, att = 0;
+    do {
+      nx = (Math.random() - 0.5) * (WORLD_SIZE - 12);
+      nz = (Math.random() - 0.5) * (WORLD_SIZE - 12);
+      att++;
+    } while (att < 20 && isInsideBuilding(nx, nz));
+    pickup.x = nx;
+    pickup.z = nz;
+    pickup.mesh.position.set(nx, 0, nz);
+    pickup.collected = false;
+    scene.add(pickup.mesh);
+  }
+
+  function updateAmmoPickups(dt) {
+    for (const pickup of ammoPickups) {
+      if (pickup.collected) continue;
+      // Animate bob + spin
+      pickup.mesh.position.y = 0.1 + Math.sin(gameTime * 2 + pickup.x) * 0.15;
+      pickup.mesh.rotation.y += dt * 2;
+
+      // Collect check
+      const dx = player.x - pickup.x, dz = player.z - pickup.z;
+      if (Math.sqrt(dx * dx + dz * dz) < 1.8) {
+        pickup.collected = true;
+        scene.remove(pickup.mesh);
+        magazines++;
+        showMessage('📦 +1 MAGAZINE!', 1.5);
+        setTimeout(() => respawnAmmoPickup(pickup), AMMO_PICKUP_RESPAWN);
+      }
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
   //  UPDATE — Camera
   // ═══════════════════════════════════════════════════════════
 
   function updateCamera(dt) {
-    if (povMode === 'first') {
-      // First-person: camera at player's eyes, looking forward
-      const eyePos = new THREE.Vector3(player.x, player.y + FP_EYE_HEIGHT, player.z);
-      camera.position.copy(eyePos);
+    // FPS only — camera at player's eyes
+    const eyePos = new THREE.Vector3(player.x, player.y + FP_EYE_HEIGHT, player.z);
+    camera.position.copy(eyePos);
 
-      // Look direction based on yaw + pitch
-      const lookTarget = new THREE.Vector3(
-        player.x + Math.sin(cameraYaw) * Math.cos(cameraPitch),
-        player.y + FP_EYE_HEIGHT + Math.sin(cameraPitch),
-        player.z + Math.cos(cameraYaw) * Math.cos(cameraPitch)
-      );
-      camera.lookAt(lookTarget);
+    // Look direction based on yaw + pitch
+    const lookTarget = new THREE.Vector3(
+      player.x + Math.sin(cameraYaw) * Math.cos(cameraPitch),
+      player.y + FP_EYE_HEIGHT + Math.sin(cameraPitch),
+      player.z + Math.cos(cameraYaw) * Math.cos(cameraPitch)
+    );
+    camera.lookAt(lookTarget);
 
-      // Hide player body but show gun attached to camera
-      if (playerMesh) playerMesh.visible = false;
-
-      // Show FPS gun model attached to camera
-      if (fpGunMesh) {
-        fpGunMesh.visible = true;
-      }
-    } else {
-      // Third-person: orbiting camera
-      if (keys['KeyQ']) cameraHeight = Math.min(CAMERA_HEIGHT_MAX, cameraHeight + CAMERA_HEIGHT_SPEED * dt);
-      if (keys['KeyE']) cameraHeight = Math.max(CAMERA_HEIGHT_MIN, cameraHeight - CAMERA_HEIGHT_SPEED * dt);
-
-      const idealOffset = new THREE.Vector3(
-        -Math.sin(cameraYaw) * CAMERA_DIST,
-        cameraHeight,
-        -Math.cos(cameraYaw) * CAMERA_DIST
-      );
-      const idealTarget = new THREE.Vector3(player.x, player.y + 2, player.z);
-      camera.position.lerp(idealTarget.clone().add(idealOffset), CAMERA_LERP * dt);
-      camera.lookAt(new THREE.Vector3(player.x, player.y + 1.5, player.z));
-
-      // Show player mesh in third person, hide FPS gun
-      if (playerMesh) playerMesh.visible = true;
-      if (fpGunMesh) fpGunMesh.visible = false;
-    }
+    // Hide player body, gun is on camera
+    if (playerMesh) playerMesh.visible = false;
+    if (fpGunMesh) fpGunMesh.visible = true;
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -2370,6 +2473,21 @@
 
     staminaFill.style.width = (stamina / STAMINA_MAX * 100) + '%';
     staminaFill.classList.toggle('low', stamina < 25);
+
+    // Ammo HUD
+    const ammoEl = document.getElementById('hud-ammo');
+    if (ammoEl) {
+      if (isReloading) {
+        ammoEl.textContent = 'RELOADING...';
+        ammoEl.style.color = '#ffaa00';
+      } else if (ammoInMag <= 0 && magazines <= 0) {
+        ammoEl.textContent = 'NO AMMO';
+        ammoEl.style.color = '#ff3355';
+      } else {
+        ammoEl.textContent = ammoInMag + '/' + MAG_SIZE + '  [' + magazines + ']';
+        ammoEl.style.color = ammoInMag <= 5 ? '#ff3355' : '#e8e8f0';
+      }
+    }
 
     if (messageTimer > 0) {
       messageTimer -= dt;
@@ -2441,6 +2559,15 @@
       ctx.fill();
     }
 
+    // Ammo pickups
+    ctx.fillStyle = '#44ff44';
+    for (const a of ammoPickups) {
+      if (a.collected) continue;
+      ctx.beginPath();
+      ctx.arc(toX(a.x), toZ(a.z), 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
     // Enemies
     for (const e of enemies) {
       ctx.fillStyle = e.type === 'krabs' ? '#ff8800' : '#ff2244';
@@ -2500,6 +2627,7 @@
       e.preventDefault();
     }
     if (e.code === 'KeyC' && gameRunning) throwCoin();
+    if (e.code === 'KeyR' && gameRunning) startReload();
   });
 
   document.addEventListener('keyup', (e) => { keys[e.code] = false; });
@@ -2578,14 +2706,7 @@
     });
   }
 
-  // POV toggle buttons
-  document.querySelectorAll('.pov-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.pov-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      povMode = btn.dataset.pov;
-    });
-  });
+
 
   // Load Patrick
   new THREE.GLTFLoader().load('models/patrick.glb', (gltf) => {

@@ -34,6 +34,10 @@
         <span id="hud-enemies" class="hud-value">3</span>
       </div>
       <div class="hud-item">
+        <span class="hud-label">AMMO</span>
+        <span id="hud-ammo" class="hud-value">30/30 [3]</span>
+      </div>
+      <div class="hud-item">
         <span class="hud-label">STAMINA</span>
         <div id="stamina-bar">
           <div id="stamina-fill"></div>
@@ -74,7 +78,7 @@
       <div class="controls-hint">
         <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or <kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd> — Move</p>
         <p><kbd>SHIFT</kbd> — Sprint &nbsp;&nbsp; <kbd>SPACE</kbd> — Jump &nbsp;&nbsp; <kbd>C</kbd> — Throw Coin</p>
-        <p><kbd>🖱️ LEFT CLICK</kbd> — Shoot M16</p>
+        <p><kbd>🖱️ LEFT CLICK</kbd> — Shoot M16 &nbsp;&nbsp; <kbd>R</kbd> — Reload</p>
       </div>
     </div>
 
@@ -93,15 +97,7 @@
         <h3>🖱️ Mouse Sensitivity</h3>
         <div class="setting-row">
           <input type="range" id="sensitivity-slider" min="1" max="20" step="0.5" value="1">
-          <span id="sensitivity-value" class="setting-val">4.0</span>
-        </div>
-      </div>
-
-      <div class="settings-section">
-        <h3>📷 Camera POV</h3>
-        <div class="pov-options">
-          <button class="pov-btn" data-pov="third">Third Person</button>
-          <button class="pov-btn active" data-pov="first">First Person</button>
+          <span id="sensitivity-value" class="setting-val">1.0</span>
         </div>
       </div>
 
@@ -121,6 +117,7 @@
           <p><kbd>C</kbd> — Throw a coin behind you</p>
           <p><kbd>Q</kbd> / <kbd>E</kbd> — Raise / Lower camera</p>
           <p><kbd>🖱️ LEFT CLICK</kbd> — Shoot M16 rifle</p>
+          <p><kbd>R</kbd> — Reload magazine (2.5s)</p>
         </div>
       </div>
 
