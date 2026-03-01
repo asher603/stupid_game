@@ -48,22 +48,6 @@
 
   const LOW_BLOCK_HEIGHT = 1.2;   // Height of jumpable blocks
 
-  // M16 / Shooting
-  const SHOOT_COOLDOWN    = 0.12;   // Seconds between shots
-  const BULLET_SPEED      = 120;
-  const BULLET_MAX_DIST   = 80;
-  const BULLET_DAMAGE     = 1;      // Hits to kill
-  const ENEMY_HP          = 2;      // Hits each enemy can take
-  const MUZZLE_FLASH_TIME = 0.06;
-  const TRACER_LIFETIME   = 0.15;
-
-  // Ammo / Magazine
-  const MAG_SIZE          = 30;     // Bullets per magazine
-  const MAX_MAGAZINES     = 3;      // Starting magazines
-  const RELOAD_TIME       = 1.5;    // Seconds to reload
-  const AMMO_PICKUP_COUNT = 5;      // Ammo pickups on map per level
-  const AMMO_PICKUP_RESPAWN = 15000; // ms to respawn pickup
-
   // Player boost per level (stacks)
   const PLAYER_SPEED_BOOST  = 0.08;   // +8% speed per level
   const PLAYER_JUMP_BOOST   = 0.06;   // +6% jump per level
@@ -301,8 +285,6 @@
   let patrickAnimations = [];
   let krabsModel        = null;
   let krabsAnimations   = [];
-  let m16Model          = null;
-  let m16Mesh           = null;    // Instance attached to player
 
   // World objects
   let enemies   = [];
@@ -312,32 +294,8 @@
   let lowBlocks = [];   // Jumpable platforms
   let decorations = []; // Animated decorative elements (no collision)
 
-  // Shooting
-  let bullets       = [];
-  let shootCooldown = 0;
-  let muzzleFlashMesh = null;
-  let muzzleFlashTimer = 0;
-  let tracers       = [];   // { mesh, timer }
-  let shootSound    = null;
-  let reloadSound   = null;
-
-  // Ammo
-  let ammoInMag     = MAG_SIZE;     // Current bullets in magazine
-  let magazines     = MAX_MAGAZINES; // Spare magazines
-  let isReloading   = false;
-  let reloadTimer   = 0;
-  let ammoPickups   = [];            // { mesh, x, z, collected }
-
   // Input
   const keys = {};
-  let cameraYaw = 0;           // Horizontal look angle (mouse)
-  let cameraPitch = 0;         // Vertical look angle (mouse)
-  const PITCH_LIMIT = Math.PI / 2 - 0.05;  // Almost 90° up/down
-  let MOUSE_SENSITIVITY = 0.0005;
-
-  // Settings
-  const FP_EYE_HEIGHT = 2.0;   // First-person eye height above player.y
-  let fpGunMesh = null;        // Gun mesh attached to camera for FPS view
 
   // ─────────────────────────────────────
   //  DOM ELEMENTS
@@ -362,14 +320,8 @@
   const howToPlayBtn   = document.getElementById('btn-how-to-play');
   const htpScreen      = document.getElementById('how-to-play-screen');
   const htpBackBtn     = document.getElementById('btn-htp-back');
-  const settingsScreen  = document.getElementById('settings-screen');
-  const settingsBtn     = document.getElementById('btn-settings');
-  const settingsBackBtn = document.getElementById('btn-settings-back');
-  const sensitivitySlider = document.getElementById('sensitivity-slider');
-  const sensitivityValue  = document.getElementById('sensitivity-value');
   const minimapCanvas  = document.getElementById('minimap');
   const minimapCtx     = minimapCanvas.getContext('2d');
-  const crosshairEl    = document.getElementById('crosshair');
 
   // Level select
   const levelSelectScreen = document.getElementById('level-select-screen');
@@ -389,7 +341,7 @@
     scene.background = new THREE.Color(0x1a1a2e);
     scene.fog = new THREE.FogExp2(0x1a1a2e, 0.012);
 
-    camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.01, 300);
+    camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 300);
     camera.position.set(0, cameraHeight, CAMERA_DIST);
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -416,15 +368,6 @@
     stepSound = new Audio('sounds/player_steps.mp3');
     stepSound.loop = true;
     stepSound.volume = 0.6;
-
-    shootSound = new Audio('sounds/shoot.mp3');
-    shootSound.volume = 0.5;
-    // Fallback: if shoot.mp3 doesn't load, we'll use Web Audio
-    shootSound.addEventListener('error', () => { shootSound = null; });
-
-    reloadSound = new Audio('sounds/reload_m16.mp3');
-    reloadSound.volume = 0.7;
-    reloadSound.addEventListener('error', () => { reloadSound = null; });
 
     ['patrick_you_fat.mp3', 'get_away_from_me.mp3', 'you_smell_like.mp3', 'if_i_had.mp3'].forEach(f => {
       const a = new Audio(`sounds/${f}`);
@@ -1114,9 +1057,7 @@
 
   function updateDecorations(dt) {
     const t = clock.elapsedTime;
-    for (let i = decorations.length - 1; i >= 0; i--) {
-      const d = decorations[i];
-      if (d.type === 'dead') { decorations.splice(i, 1); continue; }
+    for (const d of decorations) {
       switch (d.type) {
         case 'bubble':
           d.mesh.position.y = d.baseY + Math.sin(t * d.speed + d.phase) * 1.5;
@@ -1191,19 +1132,6 @@
         case 'fireFlicker':
           d.mesh.scale.y = 0.8 + 0.4 * Math.sin(t * 6 + d.phase);
           d.mesh.scale.x = 0.9 + 0.2 * Math.sin(t * 5 + d.phase + 1);
-          break;
-
-        case 'deathParticle':
-          d.mesh.position.x += d.vx * dt;
-          d.mesh.position.y += d.vy * dt;
-          d.mesh.position.z += d.vz * dt;
-          d.vy -= 10 * dt; // gravity
-          d.life -= dt;
-          d.mesh.material.opacity = Math.max(0, d.life / 0.6);
-          if (d.life <= 0) {
-            scene.remove(d.mesh);
-            d.type = 'dead'; // mark for cleanup
-          }
           break;
       }
     }
@@ -1306,16 +1234,6 @@
       if (idleAction) { idleAction.play(); currentAction = idleAction; }
     }, undefined, (err) => console.error('Error loading SpongeBob:', err));
 
-    // Muzzle flash (attached to camera, no gun model)
-    if (!camera.parent) scene.add(camera);
-    const flashGeo = new THREE.SphereGeometry(0.06, 6, 6);
-    const flashMat = new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0, depthTest: false });
-    muzzleFlashMesh = new THREE.Mesh(flashGeo, flashMat);
-    muzzleFlashMesh.frustumCulled = false;
-    muzzleFlashMesh.renderOrder = 1000;
-    muzzleFlashMesh.position.set(0.1, -0.08, -0.5);
-    camera.add(muzzleFlashMesh);
-
     player = { x: 0, y: 0, z: 0, angle: 0 };
     playerVelY = 0;
     playerOnGround = true;
@@ -1388,7 +1306,6 @@
       jumpTimer: 0.3 + Math.random() * 0.3,
       isPaused: false, pauseTimer: 0,
       jumpDirX: 0, jumpDirZ: 0,
-      hp: ENEMY_HP,
     });
   }
 
@@ -1529,7 +1446,6 @@
   function showLevelSelect() {
     overlayContent.classList.add('hidden');
     if (htpScreen) htpScreen.classList.add('hidden');
-    if (settingsScreen) settingsScreen.classList.add('hidden');
     buildLevelSelectGrid();
     levelSelectScreen.classList.remove('hidden');
   }
@@ -1539,23 +1455,10 @@
     overlayContent.classList.remove('hidden');
   }
 
-  function showSettings() {
-    overlayContent.classList.add('hidden');
-    if (htpScreen) htpScreen.classList.add('hidden');
-    if (levelSelectScreen) levelSelectScreen.classList.add('hidden');
-    settingsScreen.classList.remove('hidden');
-  }
-
-  function hideSettings() {
-    settingsScreen.classList.add('hidden');
-    overlayContent.classList.remove('hidden');
-  }
-
   function startGameAtLevel(levelIdx) {
     overlay.classList.remove('active');
     hudEl.classList.add('visible');
     minimapCanvas.classList.add('visible');
-    if (crosshairEl) crosshairEl.classList.add('visible');
     if (levelBar) levelBar.classList.add('visible');
 
     currentLevel  = levelIdx;
@@ -1603,17 +1506,6 @@
     enemies = [];
     coins.forEach(c => scene.remove(c.mesh));
     coins = [];
-    bullets.forEach(b => scene.remove(b.mesh));
-    bullets = [];
-    tracers.forEach(t => scene.remove(t.mesh));
-    tracers = [];
-    shootCooldown = 0;
-    ammoInMag = MAG_SIZE;
-    magazines = MAX_MAGAZINES;
-    isReloading = false;
-    reloadTimer = 0;
-    ammoPickups.forEach(a => scene.remove(a.mesh));
-    ammoPickups = [];
     if (playerMesh) scene.remove(playerMesh);
 
     buildWorld();
@@ -1623,7 +1515,6 @@
 
     for (let i = 0; i < lvl.initialEnemies; i++) spawnEnemy(i);
     for (let i = 0; i < lvl.coinCount; i++) spawnCoin();
-    for (let i = 0; i < AMMO_PICKUP_COUNT; i++) spawnAmmoPickup();
 
     hudEnemies.textContent = enemies.length;
     if (hudLevel) hudLevel.textContent = `LEVEL ${currentLevel + 1}`;
@@ -1633,10 +1524,6 @@
 
     showMessage(`🏁 LEVEL ${currentLevel + 1}: ${lvl.name}`, 3);
     gameRunning = true;
-
-    // Initialise camera yaw from player facing direction & request pointer lock
-    cameraYaw = player.angle + Math.PI;   // camera behind player
-    requestPointerLock();
   }
 
   function completeLevel() {
@@ -1652,7 +1539,6 @@
     // Always go back to level select
     hudEl.classList.remove('visible');
     minimapCanvas.classList.remove('visible');
-    if (crosshairEl) crosshairEl.classList.remove('visible');
     if (levelBar) levelBar.classList.remove('visible');
 
     if (currentLevel + 1 >= LEVELS.length) {
@@ -1679,7 +1565,6 @@
     levelComplete = false;
     hudEl.classList.remove('visible');
     minimapCanvas.classList.remove('visible');
-    if (crosshairEl) crosshairEl.classList.remove('visible');
     if (levelBar) levelBar.classList.remove('visible');
 
     totalScore += Math.floor(score);
@@ -1725,9 +1610,6 @@
     updatePlayer(dt);
     updateEnemies(dt);
     updateCoins(dt);
-    updateBullets(dt);
-    updateReload(dt);
-    updateAmmoPickups(dt);
     updateDecorations(dt);
     updateCamera(dt);
     updateHUD(dt);
@@ -1769,9 +1651,12 @@
       if (stepSound && !stepSound.paused) stepSound.pause();
     }
 
-    // Movement — direction derived from mouse-controlled cameraYaw
+    // Movement
     if (moving) {
-      const fwdX = Math.sin(cameraYaw), fwdZ = Math.cos(cameraYaw);
+      const camFwdX = player.x - camera.position.x;
+      const camFwdZ = player.z - camera.position.z;
+      const camLen  = Math.sqrt(camFwdX * camFwdX + camFwdZ * camFwdZ) || 1;
+      const fwdX = camFwdX / camLen, fwdZ = camFwdZ / camLen;
       const rightX = -fwdZ, rightZ = fwdX;
 
       let moveX = fwdX * inputForward + rightX * inputRight;
@@ -1779,7 +1664,7 @@
       const len = Math.sqrt(moveX * moveX + moveZ * moveZ);
       moveX /= len; moveZ /= len;
 
-      player.angle = lerpAngle(player.angle, Math.atan2(moveX, moveZ), 10 * dt);
+      player.angle = lerpAngle(player.angle, Math.atan2(moveX, moveZ), 5 * dt);
 
       let nx = player.x + moveX * speed;
       let nz = player.z + moveZ * speed;
@@ -1811,8 +1696,7 @@
     }
 
     playerMesh.position.set(player.x, player.y, player.z);
-    // Face the mesh toward camera direction (mouse), not keyboard movement
-    playerMesh.rotation.y = cameraYaw + Math.PI;
+    playerMesh.rotation.y = player.angle;
 
     // Landing
     const justLanded = playerOnGround && !wasOnGround;
@@ -2109,325 +1993,21 @@
   }
 
   // ═══════════════════════════════════════════════════════════
-  //  M16 SHOOTING SYSTEM
-  // ═══════════════════════════════════════════════════════════
-
-  function shootM16() {
-    if (shootCooldown > 0) return;
-    if (isReloading) return;
-    if (ammoInMag <= 0) {
-      // Auto-reload if we have spare mags
-      startReload();
-      return;
-    }
-    shootCooldown = SHOOT_COOLDOWN;
-    ammoInMag--;
-
-    // Play sound
-    if (shootSound) {
-      const s = shootSound.cloneNode();
-      s.volume = 0.4;
-      s.play().catch(() => {});
-    } else {
-      // Web Audio fallback — short burst noise
-      try {
-        const actx = new (window.AudioContext || window.webkitAudioContext)();
-        const bufferSize = actx.sampleRate * 0.06;
-        const buffer = actx.createBuffer(1, bufferSize, actx.sampleRate);
-        const data = buffer.getChannelData(0);
-        for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufferSize, 3);
-        const src = actx.createBufferSource();
-        src.buffer = buffer;
-        const gain = actx.createGain();
-        gain.gain.value = 0.3;
-        src.connect(gain).connect(actx.destination);
-        src.start();
-      } catch(e) {}
-    }
-
-    // Muzzle flash
-    if (muzzleFlashMesh) {
-      muzzleFlashMesh.material.opacity = 0.9;
-      muzzleFlashTimer = MUZZLE_FLASH_TIME;
-    }
-
-    // Calculate bullet direction from camera yaw + pitch
-    const dirX = Math.sin(cameraYaw) * Math.cos(cameraPitch);
-    const dirY = Math.sin(cameraPitch);
-    const dirZ = Math.cos(cameraYaw) * Math.cos(cameraPitch);
-    const startY = player.y + 1.3; // chest height
-
-    // Create bullet (small sphere)
-    const bulletGeo = new THREE.SphereGeometry(0.08, 4, 4);
-    const bulletMat = new THREE.MeshBasicMaterial({ color: 0xffdd44 });
-    const bulletMesh = new THREE.Mesh(bulletGeo, bulletMat);
-    bulletMesh.position.set(player.x + dirX * 1.0, startY, player.z + dirZ * 1.0);
-    scene.add(bulletMesh);
-
-    // Tracer line
-    const tracerGeo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(dirX * 3, 0, dirZ * 3)
-    ]);
-    const tracerMat = new THREE.LineBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.6 });
-    const tracerLine = new THREE.Line(tracerGeo, tracerMat);
-    tracerLine.position.copy(bulletMesh.position);
-    scene.add(tracerLine);
-    tracers.push({ mesh: tracerLine, timer: TRACER_LIFETIME });
-
-    bullets.push({
-      mesh: bulletMesh,
-      x: bulletMesh.position.x,
-      y: startY,
-      z: bulletMesh.position.z,
-      dx: dirX,
-      dy: dirY,
-      dz: dirZ,
-      dist: 0
-    });
-  }
-
-  function updateBullets(dt) {
-    // Shoot cooldown
-    if (shootCooldown > 0) shootCooldown -= dt;
-
-    // Muzzle flash fade
-    if (muzzleFlashTimer > 0) {
-      muzzleFlashTimer -= dt;
-      if (muzzleFlashTimer <= 0 && muzzleFlashMesh) {
-        muzzleFlashMesh.material.opacity = 0;
-      }
-    }
-
-    // Update tracers
-    for (let i = tracers.length - 1; i >= 0; i--) {
-      tracers[i].timer -= dt;
-      tracers[i].mesh.material.opacity = tracers[i].timer / TRACER_LIFETIME * 0.6;
-      if (tracers[i].timer <= 0) {
-        scene.remove(tracers[i].mesh);
-        tracers.splice(i, 1);
-      }
-    }
-
-    // Update bullets
-    for (let i = bullets.length - 1; i >= 0; i--) {
-      const b = bullets[i];
-      const move = BULLET_SPEED * dt;
-      b.x += b.dx * move;
-      b.y += (b.dy || 0) * move;
-      b.z += b.dz * move;
-      b.dist += move;
-      b.mesh.position.set(b.x, b.y, b.z);
-
-      // Remove if bullet goes below ground or too high
-      if (b.y < 0 || b.y > 50) {
-        scene.remove(b.mesh);
-        bullets.splice(i, 1);
-        continue;
-      }
-
-      let hit = false;
-
-      // Check hit against enemies
-      for (let j = enemies.length - 1; j >= 0; j--) {
-        const e = enemies[j];
-        const ex = b.x - e.x, ez = b.z - e.z;
-        const edist = Math.sqrt(ex * ex + ez * ez);
-        if (edist < 1.2 && Math.abs(b.y - (e.y + 1.0)) < 1.5) {
-          // Hit!
-          hit = true;
-          if (e.hp === undefined) e.hp = ENEMY_HP;
-          e.hp -= BULLET_DAMAGE;
-
-          // Flash enemy red
-          e.mesh.traverse(child => {
-            if (child.isMesh && child.material) {
-              const origColor = child.material.color.getHex();
-              child.material.emissive = new THREE.Color(0xff0000);
-              child.material.emissiveIntensity = 0.8;
-              setTimeout(() => {
-                if (child.material) {
-                  child.material.emissive = new THREE.Color(0x000000);
-                  child.material.emissiveIntensity = 0;
-                }
-              }, 150);
-            }
-          });
-
-          if (e.hp <= 0) {
-            killEnemy(j);
-          }
-          break;
-        }
-      }
-
-      // Check hit against buildings (stop bullet)
-      if (!hit) {
-        for (const bld of buildings) {
-          if (Math.abs(b.x - bld.x) < bld.hw && Math.abs(b.z - bld.z) < bld.hd) {
-            hit = true;
-            break;
-          }
-        }
-      }
-
-      // Remove bullet if hit or too far
-      if (hit || b.dist > BULLET_MAX_DIST || Math.abs(b.x) > HALF_WORLD || Math.abs(b.z) > HALF_WORLD) {
-        scene.remove(b.mesh);
-        bullets.splice(i, 1);
-      }
-    }
-  }
-
-  function killEnemy(index) {
-    const e = enemies[index];
-
-    // Death effect — small explosion of particles
-    const particleCount = 8;
-    for (let p = 0; p < particleCount; p++) {
-      const pg = new THREE.Mesh(
-        new THREE.SphereGeometry(0.12, 4, 4),
-        new THREE.MeshBasicMaterial({ color: e.type === 'krabs' ? 0xff6600 : 0xff3366, transparent: true, opacity: 0.8 })
-      );
-      pg.position.set(e.x, e.y + 1, e.z);
-      scene.add(pg);
-      const angle = (p / particleCount) * Math.PI * 2;
-      const speed = 3 + Math.random() * 3;
-      const vy = 3 + Math.random() * 4;
-      const particle = { mesh: pg, vx: Math.cos(angle) * speed, vy, vz: Math.sin(angle) * speed, life: 0.6 };
-      decorations.push({
-        mesh: pg,
-        type: 'deathParticle',
-        vx: particle.vx, vy: particle.vy, vz: particle.vz,
-        life: particle.life
-      });
-    }
-
-    scene.remove(e.mesh);
-    enemies.splice(index, 1);
-    score += 100;  // bonus for killing
-    showMessage('💀 ENEMY KILLED! +100', 1.5);
-    hudEnemies.textContent = enemies.length;
-  }
-
-  // ═══════════════════════════════════════════════════════════
-  //  RELOAD & AMMO PICKUPS
-  // ═══════════════════════════════════════════════════════════
-
-  function startReload() {
-    if (isReloading) return;
-    if (magazines <= 0) {
-      showMessage('❌ NO MAGAZINES LEFT! Find ammo!', 2);
-      return;
-    }
-    if (ammoInMag === MAG_SIZE) return; // already full
-    isReloading = true;
-    reloadTimer = RELOAD_TIME;
-    showMessage('🔄 RELOADING...', RELOAD_TIME);
-    if (reloadSound) {
-      reloadSound.currentTime = 0;
-      reloadSound.play().catch(() => {});
-    }
-  }
-
-  function updateReload(dt) {
-    if (!isReloading) return;
-    reloadTimer -= dt;
-    if (reloadTimer <= 0) {
-      isReloading = false;
-      magazines--;
-      ammoInMag = MAG_SIZE;
-      showMessage('✅ RELOADED!', 1);
-    }
-  }
-
-  function createAmmoPickupMesh() {
-    const group = new THREE.Group();
-    // Magazine box
-    const box = new THREE.Mesh(
-      new THREE.BoxGeometry(0.3, 0.6, 0.2),
-      new THREE.MeshStandardMaterial({ color: 0x556b2f, roughness: 0.5, metalness: 0.4 })
-    );
-    box.position.y = 0.3;
-    box.castShadow = true;
-    group.add(box);
-    // Glow ring
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.4, 0.55, 16),
-      new THREE.MeshBasicMaterial({ color: 0x44ff44, transparent: true, opacity: 0.4, side: THREE.DoubleSide })
-    );
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.y = 0.05;
-    group.add(ring);
-    return group;
-  }
-
-  function spawnAmmoPickup() {
-    let x, z, att = 0;
-    do {
-      x = (Math.random() - 0.5) * (WORLD_SIZE - 12);
-      z = (Math.random() - 0.5) * (WORLD_SIZE - 12);
-      att++;
-    } while (att < 20 && isInsideBuilding(x, z));
-
-    const mesh = createAmmoPickupMesh();
-    mesh.position.set(x, 0, z);
-    scene.add(mesh);
-    ammoPickups.push({ mesh, x, z, collected: false });
-  }
-
-  function respawnAmmoPickup(pickup) {
-    let nx, nz, att = 0;
-    do {
-      nx = (Math.random() - 0.5) * (WORLD_SIZE - 12);
-      nz = (Math.random() - 0.5) * (WORLD_SIZE - 12);
-      att++;
-    } while (att < 20 && isInsideBuilding(nx, nz));
-    pickup.x = nx;
-    pickup.z = nz;
-    pickup.mesh.position.set(nx, 0, nz);
-    pickup.collected = false;
-    scene.add(pickup.mesh);
-  }
-
-  function updateAmmoPickups(dt) {
-    for (const pickup of ammoPickups) {
-      if (pickup.collected) continue;
-      // Animate bob + spin
-      pickup.mesh.position.y = 0.1 + Math.sin(gameTime * 2 + pickup.x) * 0.15;
-      pickup.mesh.rotation.y += dt * 2;
-
-      // Collect check
-      const dx = player.x - pickup.x, dz = player.z - pickup.z;
-      if (Math.sqrt(dx * dx + dz * dz) < 1.8) {
-        pickup.collected = true;
-        scene.remove(pickup.mesh);
-        magazines++;
-        showMessage('📦 +1 MAGAZINE!', 1.5);
-        setTimeout(() => respawnAmmoPickup(pickup), AMMO_PICKUP_RESPAWN);
-      }
-    }
-  }
-
-  // ═══════════════════════════════════════════════════════════
   //  UPDATE — Camera
   // ═══════════════════════════════════════════════════════════
 
   function updateCamera(dt) {
-    // FPS only — camera at player's eyes
-    const eyePos = new THREE.Vector3(player.x, player.y + FP_EYE_HEIGHT, player.z);
-    camera.position.copy(eyePos);
+    if (keys['KeyQ']) cameraHeight = Math.min(CAMERA_HEIGHT_MAX, cameraHeight + CAMERA_HEIGHT_SPEED * dt);
+    if (keys['KeyE']) cameraHeight = Math.max(CAMERA_HEIGHT_MIN, cameraHeight - CAMERA_HEIGHT_SPEED * dt);
 
-    // Look direction based on yaw + pitch
-    const lookTarget = new THREE.Vector3(
-      player.x + Math.sin(cameraYaw) * Math.cos(cameraPitch),
-      player.y + FP_EYE_HEIGHT + Math.sin(cameraPitch),
-      player.z + Math.cos(cameraYaw) * Math.cos(cameraPitch)
+    const idealOffset = new THREE.Vector3(
+      -Math.sin(player.angle) * CAMERA_DIST,
+      cameraHeight,
+      -Math.cos(player.angle) * CAMERA_DIST
     );
-    camera.lookAt(lookTarget);
-
-    // Hide player body in FPS
-    if (playerMesh) playerMesh.visible = false;
+    const idealTarget = new THREE.Vector3(player.x, player.y + 2, player.z);
+    camera.position.lerp(idealTarget.clone().add(idealOffset), CAMERA_LERP * dt);
+    camera.lookAt(new THREE.Vector3(player.x, player.y + 1.5, player.z));
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -2453,21 +2033,6 @@
 
     staminaFill.style.width = (stamina / STAMINA_MAX * 100) + '%';
     staminaFill.classList.toggle('low', stamina < 25);
-
-    // Ammo HUD
-    const ammoEl = document.getElementById('hud-ammo');
-    if (ammoEl) {
-      if (isReloading) {
-        ammoEl.textContent = 'RELOADING...';
-        ammoEl.style.color = '#ffaa00';
-      } else if (ammoInMag <= 0 && magazines <= 0) {
-        ammoEl.textContent = 'NO AMMO';
-        ammoEl.style.color = '#ff3355';
-      } else {
-        ammoEl.textContent = ammoInMag + '/' + MAG_SIZE + '  [' + magazines + ']';
-        ammoEl.style.color = ammoInMag <= 5 ? '#ff3355' : '#e8e8f0';
-      }
-    }
 
     if (messageTimer > 0) {
       messageTimer -= dt;
@@ -2539,15 +2104,6 @@
       ctx.fill();
     }
 
-    // Ammo pickups
-    ctx.fillStyle = '#44ff44';
-    for (const a of ammoPickups) {
-      if (a.collected) continue;
-      ctx.beginPath();
-      ctx.arc(toX(a.x), toZ(a.z), 2.5, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
     // Enemies
     for (const e of enemies) {
       ctx.fillStyle = e.type === 'krabs' ? '#ff8800' : '#ff2244';
@@ -2607,39 +2163,10 @@
       e.preventDefault();
     }
     if (e.code === 'KeyC' && gameRunning) throwCoin();
-    if (e.code === 'KeyR' && gameRunning) startReload();
   });
 
   document.addEventListener('keyup', (e) => { keys[e.code] = false; });
   window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
-
-  // ── Pointer Lock (FPS-style mouse look) ──
-  document.addEventListener('mousemove', (e) => {
-    if (document.pointerLockElement !== renderer.domElement) return;
-    cameraYaw -= e.movementX * MOUSE_SENSITIVITY;
-    cameraPitch -= e.movementY * MOUSE_SENSITIVITY;
-    cameraPitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, cameraPitch));
-  });
-
-  // ── Shooting with left mouse button ──
-  document.addEventListener('mousedown', (e) => {
-    if (!gameRunning) return;
-    if (document.pointerLockElement !== renderer.domElement) return;
-    if (e.button === 0) {  // Left click
-      shootM16();
-    }
-  });
-
-  function requestPointerLock() {
-    renderer.domElement.requestPointerLock();
-  }
-
-  // Click on canvas to re-acquire pointer lock if lost
-  document.addEventListener('click', () => {
-    if (gameRunning && document.pointerLockElement !== renderer.domElement) {
-      requestPointerLock();
-    }
-  });
 
   // ═══════════════════════════════════════════════════════════
   //  MAIN LOOP
@@ -2669,24 +2196,6 @@
     htpScreen.classList.add('hidden');
     overlayContent.classList.remove('hidden');
   });
-
-  // Settings screen
-  if (settingsBtn) settingsBtn.addEventListener('click', showSettings);
-  if (settingsBackBtn) settingsBackBtn.addEventListener('click', hideSettings);
-
-  // Sensitivity slider
-  if (sensitivitySlider) {
-    sensitivitySlider.value = '1';
-    MOUSE_SENSITIVITY = 1 / 2000;
-    if (sensitivityValue) sensitivityValue.textContent = '1.0';
-    sensitivitySlider.addEventListener('input', () => {
-      const val = parseFloat(sensitivitySlider.value);
-      MOUSE_SENSITIVITY = val / 2000;   // range 1-20 → 0.0005 – 0.01
-      if (sensitivityValue) sensitivityValue.textContent = val.toFixed(1);
-    });
-  }
-
-
 
   // Load Patrick
   new THREE.GLTFLoader().load('models/patrick.glb', (gltf) => {
