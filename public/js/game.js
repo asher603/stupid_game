@@ -244,7 +244,7 @@
   }
 
   // Audio
-  let bgm, jumpSound, landSound, stepSound, throwCoinSound;
+  let bgm, jumpSound, landSound, stepSound, throwCoinSound, grabCoinSound;
   let patrickShouts = [];
   let krabsShouts   = [];
   let lastShoutTime = -2.0;
@@ -361,7 +361,7 @@
 
     jumpSound = new Audio('sounds/jump.mp3');
     landSound = new Audio('sounds/player_landing.mp3');
-
+    grabCoinSound = new Audio('sounds/grab_coin.mp3');
     throwCoinSound = new Audio('sounds/take_this_coin.mp3');
     throwCoinSound.volume = 0.8;
 
@@ -1548,8 +1548,16 @@
     }
     finalScoreEl.classList.remove('hidden');
     finalScoreVal.textContent = totalScore;
-    startBtn.textContent = 'SELECT LEVEL';
+    startBtn.textContent = 'BACK TO LEVEL SELECTION';
     overlay.classList.add('active');
+
+    // Override the start button to go directly to level select
+    startBtn.onclick = function () {
+      startBtn.onclick = null;
+      startBtn.addEventListener('click', startGame);
+      finalScoreEl.classList.add('hidden');
+      showLevelSelect();
+    };
   }
 
   function gameOver(won) {
@@ -1975,6 +1983,10 @@
         scene.remove(coin.mesh);
         score += COIN_SCORE;
         playerCoins++;
+        if (grabCoinSound) {
+          grabCoinSound.currentTime = 0;
+          grabCoinSound.play().catch(() => {});
+        }
         setTimeout(() => respawnCoin(coin), COIN_RESPAWN_MS);
       }
     }
