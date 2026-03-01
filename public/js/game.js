@@ -292,6 +292,7 @@
   let buildings = [];
   let trees     = [];
   let lowBlocks = [];   // Jumpable platforms
+  let decorations = []; // Animated decorative elements (no collision)
 
   // Input
   const keys = {};
@@ -418,6 +419,7 @@
     buildings = [];
     trees = [];
     lowBlocks = [];
+    decorations = [];
 
     const lvl = getLvl();
 
@@ -590,6 +592,549 @@
     const starGeo = new THREE.BufferGeometry();
     starGeo.setAttribute('position', new THREE.BufferAttribute(sv, 3));
     scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.3, transparent: true, opacity: 0.6 })));
+
+    // Add level-specific decorations
+    addLevelDecorations(lvl);
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  LEVEL DECORATIONS  (purely visual — no collision)
+  // ═══════════════════════════════════════════════════════════
+
+  function addLevelDecorations(lvl) {
+    // ── Building windows (all levels) ──
+    for (const b of buildings) {
+      const mesh = b.mesh;
+      const bw = (b.hw - 0.5) * 2;
+      const bh = mesh.geometry.parameters.height;
+      const bd = (b.hd - 0.5) * 2;
+      const winColor = lvl.lampColor;
+      const winMat = new THREE.MeshBasicMaterial({ color: winColor, transparent: true, opacity: 0.25 + Math.random() * 0.35 });
+      const winGeo = new THREE.PlaneGeometry(0.5, 0.7);
+
+      const rows = Math.floor(bh / 2);
+      const cols = Math.max(1, Math.floor(bw / 2));
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          if (Math.random() > 0.6) continue;
+          const wx = b.x - bw / 2 + 0.8 + c * 1.8 + Math.random() * 0.3;
+          const wy = 1.5 + r * 2.2;
+          // Front face
+          const win = new THREE.Mesh(winGeo, winMat.clone());
+          win.material.opacity = 0.15 + Math.random() * 0.4;
+          win.position.set(wx, wy, b.z + bd / 2 + 0.26);
+          scene.add(win);
+          // Back face
+          const win2 = win.clone();
+          win2.position.z = b.z - bd / 2 - 0.26;
+          win2.rotation.y = Math.PI;
+          scene.add(win2);
+        }
+      }
+    }
+
+    // ── Ground scatter — small rocks/pebbles (all levels) ──
+    const rockMat = new THREE.MeshStandardMaterial({ color: lvl.groundColor, roughness: 1.0, metalness: 0 });
+    for (let i = 0; i < 60; i++) {
+      const rx = (Math.random() - 0.5) * (WORLD_SIZE - 6);
+      const rz = (Math.random() - 0.5) * (WORLD_SIZE - 6);
+      const rs = 0.1 + Math.random() * 0.25;
+      const rock = new THREE.Mesh(
+        new THREE.DodecahedronGeometry(rs, 0),
+        rockMat
+      );
+      rock.position.set(rx, rs * 0.4, rz);
+      rock.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
+      scene.add(rock);
+    }
+
+    // ── Level-specific decorations ──
+    switch (currentLevel) {
+
+      // ════════ LEVEL 0: Bikini Bottom Night ════════
+      case 0: {
+        // Floating bubbles
+        for (let i = 0; i < 40; i++) {
+          const size = 0.1 + Math.random() * 0.3;
+          const bubble = new THREE.Mesh(
+            new THREE.SphereGeometry(size, 8, 8),
+            new THREE.MeshPhysicalMaterial({
+              color: 0x88ccff, transparent: true, opacity: 0.15,
+              roughness: 0.1, metalness: 0.1, clearcoat: 1.0
+            })
+          );
+          const bx = (Math.random() - 0.5) * WORLD_SIZE;
+          const by = 1 + Math.random() * 15;
+          const bz = (Math.random() - 0.5) * WORLD_SIZE;
+          bubble.position.set(bx, by, bz);
+          scene.add(bubble);
+          decorations.push({ mesh: bubble, type: 'bubble', baseY: by, speed: 0.5 + Math.random() * 1.0, phase: Math.random() * Math.PI * 2 });
+        }
+
+        // Coral formations
+        const coralColors = [0xff4466, 0xff6688, 0xcc3355, 0xff8844, 0xaa2255];
+        for (let i = 0; i < 25; i++) {
+          const cx = (Math.random() - 0.5) * (WORLD_SIZE - 14);
+          const cz = (Math.random() - 0.5) * (WORLD_SIZE - 14);
+          if (Math.abs(cx) < 6 && Math.abs(cz) < 6) continue;
+          const coral = new THREE.Group();
+          const branches = 2 + Math.floor(Math.random() * 3);
+          const cColor = coralColors[Math.floor(Math.random() * coralColors.length)];
+          for (let b = 0; b < branches; b++) {
+            const h = 0.5 + Math.random() * 1.5;
+            const branch = new THREE.Mesh(
+              new THREE.CylinderGeometry(0.05, 0.15 + Math.random() * 0.1, h, 5),
+              new THREE.MeshStandardMaterial({ color: cColor, roughness: 0.6, emissive: cColor, emissiveIntensity: 0.1 })
+            );
+            branch.position.set((Math.random() - 0.5) * 0.4, h / 2, (Math.random() - 0.5) * 0.4);
+            branch.rotation.z = (Math.random() - 0.5) * 0.4;
+            coral.add(branch);
+            // Coral tip
+            const tip = new THREE.Mesh(
+              new THREE.SphereGeometry(0.08 + Math.random() * 0.08, 6, 6),
+              new THREE.MeshStandardMaterial({ color: 0xffaacc, emissive: 0xffaacc, emissiveIntensity: 0.2 })
+            );
+            tip.position.set(branch.position.x, h, branch.position.z);
+            coral.add(tip);
+          }
+          coral.position.set(cx, 0, cz);
+          scene.add(coral);
+        }
+
+        // Seaweed (animated swaying)
+        for (let i = 0; i < 30; i++) {
+          const sx = (Math.random() - 0.5) * (WORLD_SIZE - 8);
+          const sz = (Math.random() - 0.5) * (WORLD_SIZE - 8);
+          if (Math.abs(sx) < 5 && Math.abs(sz) < 5) continue;
+          const h = 1 + Math.random() * 2;
+          const seaweed = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.03, 0.06, h, 4),
+            new THREE.MeshStandardMaterial({ color: 0x22aa44, roughness: 0.8, emissive: 0x115522, emissiveIntensity: 0.15 })
+          );
+          seaweed.position.set(sx, h / 2, sz);
+          scene.add(seaweed);
+          decorations.push({ mesh: seaweed, type: 'sway', baseX: sx, phase: Math.random() * Math.PI * 2 });
+        }
+
+        // Neon signs on some buildings
+        for (let i = 0; i < Math.min(5, buildings.length); i++) {
+          const b = buildings[Math.floor(Math.random() * buildings.length)];
+          const bh = b.mesh.geometry.parameters.height;
+          const signColors = [0x00ffff, 0xff00ff, 0xffff00, 0xff4488];
+          const signMat = new THREE.MeshBasicMaterial({
+            color: signColors[Math.floor(Math.random() * signColors.length)],
+            transparent: true, opacity: 0.5
+          });
+          const sign = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.5), signMat);
+          sign.position.set(b.x, bh * 0.7, b.z + (b.hd - 0.5) + 0.27);
+          scene.add(sign);
+          decorations.push({ mesh: sign, type: 'flicker', baseOpacity: 0.5, phase: Math.random() * Math.PI * 2 });
+        }
+        break;
+      }
+
+      // ════════ LEVEL 1: Jellyfish Fields ════════
+      case 1: {
+        // Floating jellyfish
+        for (let i = 0; i < 20; i++) {
+          const jelly = new THREE.Group();
+          const jColor = [0xff66cc, 0xcc44ff, 0x66aaff, 0xff88aa, 0xaa66ff][Math.floor(Math.random() * 5)];
+          // Dome
+          const dome = new THREE.Mesh(
+            new THREE.SphereGeometry(0.4, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2),
+            new THREE.MeshStandardMaterial({ color: jColor, transparent: true, opacity: 0.45, emissive: jColor, emissiveIntensity: 0.4, side: THREE.DoubleSide })
+          );
+          jelly.add(dome);
+          // Tentacles
+          for (let t = 0; t < 4; t++) {
+            const tent = new THREE.Mesh(
+              new THREE.CylinderGeometry(0.02, 0.01, 0.8 + Math.random() * 0.5, 3),
+              new THREE.MeshBasicMaterial({ color: jColor, transparent: true, opacity: 0.3 })
+            );
+            tent.position.set((Math.random() - 0.5) * 0.3, -0.5, (Math.random() - 0.5) * 0.3);
+            jelly.add(tent);
+          }
+          // Glow
+          const glow = new THREE.PointLight(jColor, 0.2, 5);
+          jelly.add(glow);
+
+          const jx = (Math.random() - 0.5) * WORLD_SIZE;
+          const jy = 4 + Math.random() * 10;
+          const jz = (Math.random() - 0.5) * WORLD_SIZE;
+          jelly.position.set(jx, jy, jz);
+          scene.add(jelly);
+          decorations.push({ mesh: jelly, type: 'jellyfish', baseY: jy, baseX: jx, baseZ: jz, speed: 0.3 + Math.random() * 0.5, phase: Math.random() * Math.PI * 2. });
+        }
+
+        // Flowers on ground
+        const flowerColors = [0xff4488, 0xffaa22, 0xff66cc, 0xffff44, 0xaa44ff];
+        for (let i = 0; i < 50; i++) {
+          const fx = (Math.random() - 0.5) * (WORLD_SIZE - 6);
+          const fz = (Math.random() - 0.5) * (WORLD_SIZE - 6);
+          const flower = new THREE.Group();
+          const fc = flowerColors[Math.floor(Math.random() * flowerColors.length)];
+          // Stem
+          const stem = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.02, 0.02, 0.3, 3),
+            new THREE.MeshStandardMaterial({ color: 0x22aa22 })
+          );
+          stem.position.y = 0.15;
+          flower.add(stem);
+          // Petals
+          const petal = new THREE.Mesh(
+            new THREE.CircleGeometry(0.12, 6),
+            new THREE.MeshStandardMaterial({ color: fc, side: THREE.DoubleSide, emissive: fc, emissiveIntensity: 0.15 })
+          );
+          petal.position.y = 0.32;
+          petal.rotation.x = -Math.PI / 2;
+          flower.add(petal);
+          flower.position.set(fx, 0, fz);
+          scene.add(flower);
+        }
+
+        // Tall grass patches
+        for (let i = 0; i < 40; i++) {
+          const gx = (Math.random() - 0.5) * (WORLD_SIZE - 8);
+          const gz = (Math.random() - 0.5) * (WORLD_SIZE - 8);
+          const grass = new THREE.Mesh(
+            new THREE.ConeGeometry(0.15, 0.6 + Math.random() * 0.4, 3),
+            new THREE.MeshStandardMaterial({ color: 0x44bb44, roughness: 0.9 })
+          );
+          grass.position.set(gx, 0.3, gz);
+          scene.add(grass);
+          decorations.push({ mesh: grass, type: 'sway', baseX: gx, phase: Math.random() * Math.PI * 2 });
+        }
+
+        // Fireflies
+        for (let i = 0; i < 25; i++) {
+          const fly = new THREE.Mesh(
+            new THREE.SphereGeometry(0.06, 4, 4),
+            new THREE.MeshBasicMaterial({ color: 0xffff66 })
+          );
+          const fx2 = (Math.random() - 0.5) * WORLD_SIZE;
+          const fy2 = 1 + Math.random() * 4;
+          const fz2 = (Math.random() - 0.5) * WORLD_SIZE;
+          fly.position.set(fx2, fy2, fz2);
+          scene.add(fly);
+          const flyLight = new THREE.PointLight(0xffff44, 0.15, 3);
+          flyLight.position.copy(fly.position);
+          scene.add(flyLight);
+          decorations.push({ mesh: fly, light: flyLight, type: 'firefly', baseX: fx2, baseY: fy2, baseZ: fz2, phase: Math.random() * Math.PI * 2, speed: 0.8 + Math.random() });
+        }
+        break;
+      }
+
+      // ════════ LEVEL 2: Rock Bottom ════════
+      case 2: {
+        // Bioluminescent crystals
+        const crystalColors = [0x4422ff, 0x8844ff, 0x2266ff, 0x6622cc, 0x44aaff];
+        for (let i = 0; i < 35; i++) {
+          const cx = (Math.random() - 0.5) * (WORLD_SIZE - 10);
+          const cz = (Math.random() - 0.5) * (WORLD_SIZE - 10);
+          if (Math.abs(cx) < 5 && Math.abs(cz) < 5) continue;
+          const cColor = crystalColors[Math.floor(Math.random() * crystalColors.length)];
+          const h = 0.5 + Math.random() * 2;
+          const crystal = new THREE.Mesh(
+            new THREE.ConeGeometry(0.15 + Math.random() * 0.2, h, 4),
+            new THREE.MeshStandardMaterial({ color: cColor, emissive: cColor, emissiveIntensity: 0.5, transparent: true, opacity: 0.7, roughness: 0.1, metalness: 0.8 })
+          );
+          crystal.position.set(cx, h / 2, cz);
+          crystal.rotation.z = (Math.random() - 0.5) * 0.3;
+          scene.add(crystal);
+          decorations.push({ mesh: crystal, type: 'pulse', baseIntensity: 0.5, phase: Math.random() * Math.PI * 2 });
+
+          // Crystal glow light
+          if (Math.random() > 0.5) {
+            const gl = new THREE.PointLight(cColor, 0.25, 6);
+            gl.position.set(cx, h, cz);
+            scene.add(gl);
+          }
+        }
+
+        // Glowing mushrooms
+        for (let i = 0; i < 20; i++) {
+          const mx = (Math.random() - 0.5) * (WORLD_SIZE - 8);
+          const mz = (Math.random() - 0.5) * (WORLD_SIZE - 8);
+          const mush = new THREE.Group();
+          const mColor = [0x8844ff, 0x44ff88, 0x44aaff][Math.floor(Math.random() * 3)];
+          // Stem
+          const mStem = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.06, 0.08, 0.4, 5),
+            new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.8 })
+          );
+          mStem.position.y = 0.2;
+          mush.add(mStem);
+          // Cap
+          const mCap = new THREE.Mesh(
+            new THREE.SphereGeometry(0.2, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2),
+            new THREE.MeshStandardMaterial({ color: mColor, emissive: mColor, emissiveIntensity: 0.6, transparent: true, opacity: 0.7, side: THREE.DoubleSide })
+          );
+          mCap.position.y = 0.4;
+          mush.add(mCap);
+          mush.position.set(mx, 0, mz);
+          scene.add(mush);
+          decorations.push({ mesh: mush, type: 'pulse', baseIntensity: 0.6, phase: Math.random() * Math.PI * 2, target: mCap });
+        }
+
+        // Eerie floating particles
+        for (let i = 0; i < 30; i++) {
+          const particle = new THREE.Mesh(
+            new THREE.SphereGeometry(0.05, 4, 4),
+            new THREE.MeshBasicMaterial({ color: 0x6644ff, transparent: true, opacity: 0.4 })
+          );
+          const px = (Math.random() - 0.5) * WORLD_SIZE;
+          const py = 0.5 + Math.random() * 8;
+          const pz = (Math.random() - 0.5) * WORLD_SIZE;
+          particle.position.set(px, py, pz);
+          scene.add(particle);
+          decorations.push({ mesh: particle, type: 'floatRandom', baseX: px, baseY: py, baseZ: pz, phase: Math.random() * Math.PI * 2, speed: 0.3 + Math.random() * 0.5 });
+        }
+
+        // Dark stalactites from above
+        for (let i = 0; i < 20; i++) {
+          const sx = (Math.random() - 0.5) * (WORLD_SIZE - 10);
+          const sz = (Math.random() - 0.5) * (WORLD_SIZE - 10);
+          const h = 1 + Math.random() * 3;
+          const stalactite = new THREE.Mesh(
+            new THREE.ConeGeometry(0.3 + Math.random() * 0.3, h, 5),
+            new THREE.MeshStandardMaterial({ color: 0x1a1a33, roughness: 0.9, metalness: 0.1 })
+          );
+          stalactite.position.set(sx, 25 - h / 2, sz);
+          stalactite.rotation.z = Math.PI; // Point downward
+          scene.add(stalactite);
+        }
+        break;
+      }
+
+      // ════════ LEVEL 3: The Dump ════════
+      case 3: {
+        // Trash heaps
+        for (let i = 0; i < 30; i++) {
+          const tx = (Math.random() - 0.5) * (WORLD_SIZE - 10);
+          const tz = (Math.random() - 0.5) * (WORLD_SIZE - 10);
+          if (Math.abs(tx) < 5 && Math.abs(tz) < 5) continue;
+          const heap = new THREE.Group();
+          const trashColors = [0x665544, 0x887766, 0x554433, 0x776655, 0x443322];
+          const pieces = 3 + Math.floor(Math.random() * 4);
+          for (let p = 0; p < pieces; p++) {
+            const s = 0.1 + Math.random() * 0.3;
+            const piece = new THREE.Mesh(
+              Math.random() > 0.5 ? new THREE.BoxGeometry(s, s, s) : new THREE.DodecahedronGeometry(s * 0.6, 0),
+              new THREE.MeshStandardMaterial({ color: trashColors[Math.floor(Math.random() * trashColors.length)], roughness: 0.9 })
+            );
+            piece.position.set((Math.random() - 0.5) * 0.8, s / 2 + Math.random() * 0.2, (Math.random() - 0.5) * 0.8);
+            piece.rotation.set(Math.random(), Math.random(), Math.random());
+            heap.add(piece);
+          }
+          heap.position.set(tx, 0, tz);
+          scene.add(heap);
+        }
+
+        // Puddles (flat reflective circles)
+        for (let i = 0; i < 15; i++) {
+          const px = (Math.random() - 0.5) * (WORLD_SIZE - 8);
+          const pz = (Math.random() - 0.5) * (WORLD_SIZE - 8);
+          const puddle = new THREE.Mesh(
+            new THREE.CircleGeometry(0.5 + Math.random() * 1.5, 12),
+            new THREE.MeshStandardMaterial({ color: 0x334422, roughness: 0.1, metalness: 0.6, transparent: true, opacity: 0.4, side: THREE.DoubleSide })
+          );
+          puddle.rotation.x = -Math.PI / 2;
+          puddle.position.set(px, 0.02, pz);
+          scene.add(puddle);
+        }
+
+        // Smoke / steam columns
+        for (let i = 0; i < 12; i++) {
+          const sx = (Math.random() - 0.5) * (WORLD_SIZE - 12);
+          const sz = (Math.random() - 0.5) * (WORLD_SIZE - 12);
+          for (let s = 0; s < 5; s++) {
+            const smoke = new THREE.Mesh(
+              new THREE.SphereGeometry(0.3 + s * 0.15, 6, 6),
+              new THREE.MeshBasicMaterial({ color: 0x887766, transparent: true, opacity: 0.08 - s * 0.012 })
+            );
+            smoke.position.set(sx + (Math.random() - 0.5) * 0.3, 0.5 + s * 1.2, sz + (Math.random() - 0.5) * 0.3);
+            scene.add(smoke);
+            decorations.push({ mesh: smoke, type: 'rise', baseY: 0.5 + s * 1.2, speed: 0.3 + Math.random() * 0.3, phase: Math.random() * Math.PI * 2 });
+          }
+        }
+
+        // Flies (tiny dark particles buzzing)
+        for (let i = 0; i < 20; i++) {
+          const fly = new THREE.Mesh(
+            new THREE.SphereGeometry(0.03, 3, 3),
+            new THREE.MeshBasicMaterial({ color: 0x222200 })
+          );
+          const fx = (Math.random() - 0.5) * WORLD_SIZE;
+          const fy = 0.5 + Math.random() * 3;
+          const fz = (Math.random() - 0.5) * WORLD_SIZE;
+          fly.position.set(fx, fy, fz);
+          scene.add(fly);
+          decorations.push({ mesh: fly, type: 'buzz', baseX: fx, baseY: fy, baseZ: fz, phase: Math.random() * Math.PI * 2, speed: 3 + Math.random() * 4 });
+        }
+        break;
+      }
+
+      // ════════ LEVEL 4: Flying Dutchman's Ship ════════
+      case 4: {
+        // Ghost wisps
+        for (let i = 0; i < 30; i++) {
+          const wisp = new THREE.Mesh(
+            new THREE.SphereGeometry(0.2 + Math.random() * 0.3, 8, 8),
+            new THREE.MeshBasicMaterial({ color: 0x44ff66, transparent: true, opacity: 0.15 })
+          );
+          const wx = (Math.random() - 0.5) * WORLD_SIZE;
+          const wy = 1 + Math.random() * 10;
+          const wz = (Math.random() - 0.5) * WORLD_SIZE;
+          wisp.position.set(wx, wy, wz);
+          scene.add(wisp);
+          const wispLight = new THREE.PointLight(0x44ff44, 0.12, 4);
+          wispLight.position.copy(wisp.position);
+          scene.add(wispLight);
+          decorations.push({ mesh: wisp, light: wispLight, type: 'ghost', baseX: wx, baseY: wy, baseZ: wz, phase: Math.random() * Math.PI * 2, speed: 0.4 + Math.random() * 0.6 });
+        }
+
+        // Spectral fog layers
+        for (let i = 0; i < 8; i++) {
+          const fogPlane = new THREE.Mesh(
+            new THREE.PlaneGeometry(15 + Math.random() * 20, 2),
+            new THREE.MeshBasicMaterial({ color: 0x22ff44, transparent: true, opacity: 0.04, side: THREE.DoubleSide })
+          );
+          fogPlane.position.set(
+            (Math.random() - 0.5) * WORLD_SIZE * 0.6,
+            0.5 + Math.random() * 2,
+            (Math.random() - 0.5) * WORLD_SIZE * 0.6
+          );
+          fogPlane.rotation.y = Math.random() * Math.PI;
+          scene.add(fogPlane);
+          decorations.push({ mesh: fogPlane, type: 'drift', baseX: fogPlane.position.x, phase: Math.random() * Math.PI * 2 });
+        }
+
+        // Green fire on some buildings
+        for (let i = 0; i < Math.min(8, buildings.length); i++) {
+          const b = buildings[i];
+          const bh = b.mesh.geometry.parameters.height;
+          const fire = new THREE.Group();
+          for (let f = 0; f < 3; f++) {
+            const flame = new THREE.Mesh(
+              new THREE.ConeGeometry(0.15, 0.5 + Math.random() * 0.4, 4),
+              new THREE.MeshBasicMaterial({ color: [0x00ff44, 0x22ff66, 0x44ff88][f], transparent: true, opacity: 0.35 })
+            );
+            flame.position.set((Math.random() - 0.5) * 0.3, 0.2 + f * 0.1, (Math.random() - 0.5) * 0.3);
+            fire.add(flame);
+          }
+          fire.position.set(b.x, bh + 0.1, b.z);
+          scene.add(fire);
+          decorations.push({ mesh: fire, type: 'fireFlicker', phase: Math.random() * Math.PI * 2 });
+        }
+
+        // Ghostly chains hanging
+        for (let i = 0; i < 15; i++) {
+          const cx = (Math.random() - 0.5) * (WORLD_SIZE - 10);
+          const cz = (Math.random() - 0.5) * (WORLD_SIZE - 10);
+          const chainGroup = new THREE.Group();
+          const links = 4 + Math.floor(Math.random() * 4);
+          for (let l = 0; l < links; l++) {
+            const link = new THREE.Mesh(
+              new THREE.TorusGeometry(0.08, 0.025, 4, 6),
+              new THREE.MeshStandardMaterial({ color: 0x225533, emissive: 0x113322, emissiveIntensity: 0.3, transparent: true, opacity: 0.5 })
+            );
+            link.position.y = -l * 0.2;
+            link.rotation.x = l % 2 === 0 ? 0 : Math.PI / 2;
+            chainGroup.add(link);
+          }
+          chainGroup.position.set(cx, 18 + Math.random() * 5, cz);
+          scene.add(chainGroup);
+          decorations.push({ mesh: chainGroup, type: 'sway', baseX: cx, phase: Math.random() * Math.PI * 2 });
+        }
+        break;
+      }
+    }
+  }
+
+  // ─────────────────────────────────────
+  //  DECORATION ANIMATION
+  // ─────────────────────────────────────
+
+  function updateDecorations(dt) {
+    const t = clock.elapsedTime;
+    for (const d of decorations) {
+      switch (d.type) {
+        case 'bubble':
+          d.mesh.position.y = d.baseY + Math.sin(t * d.speed + d.phase) * 1.5;
+          d.mesh.position.x += Math.sin(t * 0.5 + d.phase) * dt * 0.2;
+          // Reset if too high
+          if (d.mesh.position.y > 25) d.mesh.position.y = 0.5;
+          break;
+
+        case 'sway':
+          d.mesh.position.x = d.baseX + Math.sin(t * 1.5 + d.phase) * 0.15;
+          break;
+
+        case 'flicker':
+          d.mesh.material.opacity = d.baseOpacity * (0.6 + 0.4 * Math.sin(t * 3 + d.phase));
+          break;
+
+        case 'jellyfish':
+          d.mesh.position.y = d.baseY + Math.sin(t * d.speed + d.phase) * 2;
+          d.mesh.position.x = d.baseX + Math.sin(t * 0.3 + d.phase) * 3;
+          d.mesh.position.z = d.baseZ + Math.cos(t * 0.3 + d.phase) * 3;
+          break;
+
+        case 'firefly':
+          d.mesh.position.x = d.baseX + Math.sin(t * d.speed + d.phase) * 2;
+          d.mesh.position.y = d.baseY + Math.sin(t * d.speed * 0.7 + d.phase) * 1;
+          d.mesh.position.z = d.baseZ + Math.cos(t * d.speed * 0.8 + d.phase) * 2;
+          d.mesh.material.opacity = 0.5 + 0.5 * Math.sin(t * 4 + d.phase);
+          if (d.light) d.light.position.copy(d.mesh.position);
+          break;
+
+        case 'pulse': {
+          const intensity = d.baseIntensity * (0.5 + 0.5 * Math.sin(t * 2 + d.phase));
+          const target = d.target || d.mesh;
+          if (target.material && target.material.emissiveIntensity !== undefined) {
+            target.material.emissiveIntensity = intensity;
+          }
+          break;
+        }
+
+        case 'floatRandom':
+          d.mesh.position.x = d.baseX + Math.sin(t * d.speed + d.phase) * 1.5;
+          d.mesh.position.y = d.baseY + Math.sin(t * d.speed * 0.6 + d.phase) * 0.8;
+          d.mesh.position.z = d.baseZ + Math.cos(t * d.speed * 0.8 + d.phase) * 1.5;
+          break;
+
+        case 'rise':
+          d.mesh.position.y = d.baseY + Math.sin(t * d.speed + d.phase) * 0.5 + (t * 0.1 % 2);
+          d.mesh.material.opacity = Math.max(0.01, 0.08 - (t * 0.1 % 2) * 0.03);
+          break;
+
+        case 'buzz':
+          d.mesh.position.x = d.baseX + Math.sin(t * d.speed + d.phase) * 0.5;
+          d.mesh.position.y = d.baseY + Math.sin(t * d.speed * 1.3 + d.phase) * 0.3;
+          d.mesh.position.z = d.baseZ + Math.cos(t * d.speed * 0.9 + d.phase) * 0.5;
+          break;
+
+        case 'ghost':
+          d.mesh.position.x = d.baseX + Math.sin(t * d.speed + d.phase) * 4;
+          d.mesh.position.y = d.baseY + Math.sin(t * d.speed * 0.5 + d.phase) * 2;
+          d.mesh.position.z = d.baseZ + Math.cos(t * d.speed * 0.7 + d.phase) * 4;
+          d.mesh.material.opacity = 0.08 + 0.12 * Math.sin(t * 2 + d.phase);
+          if (d.light) {
+            d.light.position.copy(d.mesh.position);
+            d.light.intensity = 0.06 + 0.1 * Math.sin(t * 2 + d.phase);
+          }
+          break;
+
+        case 'drift':
+          d.mesh.position.x = d.baseX + Math.sin(t * 0.2 + d.phase) * 5;
+          break;
+
+        case 'fireFlicker':
+          d.mesh.scale.y = 0.8 + 0.4 * Math.sin(t * 6 + d.phase);
+          d.mesh.scale.x = 0.9 + 0.2 * Math.sin(t * 5 + d.phase + 1);
+          break;
+      }
+    }
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -1057,6 +1602,7 @@
     updatePlayer(dt);
     updateEnemies(dt);
     updateCoins(dt);
+    updateDecorations(dt);
     updateCamera(dt);
     updateHUD(dt);
   }
