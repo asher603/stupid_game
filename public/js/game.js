@@ -60,7 +60,7 @@
   // Ammo / Magazine
   const MAG_SIZE          = 30;     // Bullets per magazine
   const MAX_MAGAZINES     = 3;      // Starting magazines
-  const RELOAD_TIME       = 2.5;    // Seconds to reload
+  const RELOAD_TIME       = 1.5;    // Seconds to reload
   const AMMO_PICKUP_COUNT = 5;      // Ammo pickups on map per level
   const AMMO_PICKUP_RESPAWN = 15000; // ms to respawn pickup
 
@@ -319,6 +319,7 @@
   let muzzleFlashTimer = 0;
   let tracers       = [];   // { mesh, timer }
   let shootSound    = null;
+  let reloadSound   = null;
 
   // Ammo
   let ammoInMag     = MAG_SIZE;     // Current bullets in magazine
@@ -388,7 +389,7 @@
     scene.background = new THREE.Color(0x1a1a2e);
     scene.fog = new THREE.FogExp2(0x1a1a2e, 0.012);
 
-    camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 300);
+    camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.01, 300);
     camera.position.set(0, cameraHeight, CAMERA_DIST);
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -420,6 +421,10 @@
     shootSound.volume = 0.5;
     // Fallback: if shoot.mp3 doesn't load, we'll use Web Audio
     shootSound.addEventListener('error', () => { shootSound = null; });
+
+    reloadSound = new Audio('sounds/reload_m16.mp3');
+    reloadSound.volume = 0.7;
+    reloadSound.addEventListener('error', () => { reloadSound = null; });
 
     ['patrick_you_fat.mp3', 'get_away_from_me.mp3', 'you_smell_like.mp3', 'if_i_had.mp3'].forEach(f => {
       const a = new Audio(`sounds/${f}`);
@@ -1301,43 +1306,15 @@
       if (idleAction) { idleAction.play(); currentAction = idleAction; }
     }, undefined, (err) => console.error('Error loading SpongeBob:', err));
 
-    // Load M16 and attach to camera for FPS view
-    const gunLoader = new THREE.GLTFLoader();
-    gunLoader.load('models/m16.glb', (gltf) => {
-      const gunScene = gltf.scene;
-      const bbox = new THREE.Box3().setFromObject(gunScene);
-      const size = bbox.getSize(new THREE.Vector3());
-      const s = 1.5 / (size.y || 1);
-
-      // FPS gun — positioned in bottom-right of camera view
-      fpGunMesh = gunScene;
-      fpGunMesh.scale.set(s, s, s);
-      fpGunMesh.position.set(0.4, -0.35, -0.7);   // right, down, forward
-      fpGunMesh.rotation.set(0, Math.PI, 0);
-      fpGunMesh.traverse(child => {
-        if (child.isMesh) {
-          child.castShadow = false;
-          child.receiveShadow = false;
-          child.renderOrder = 999;            // render on top
-          child.material = child.material.clone();
-          child.material.depthTest = false;   // always visible
-        }
-      });
-      camera.add(fpGunMesh);
-      // camera must be in scene graph to render its children
-      if (!camera.parent) scene.add(camera);
-
-      // Muzzle flash
-      const flashGeo = new THREE.SphereGeometry(0.12, 6, 6);
-      const flashMat = new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0, depthTest: false });
-      muzzleFlashMesh = new THREE.Mesh(flashGeo, flashMat);
-      muzzleFlashMesh.renderOrder = 1000;
-      muzzleFlashMesh.position.set(0, 0.05, -0.9); // barrel tip
-      fpGunMesh.add(muzzleFlashMesh);
-
-      fpGunMesh.visible = true;
-      console.log('M16 loaded — FPS mode');
-    }, undefined, (err) => console.error('Error loading M16:', err));
+    // Muzzle flash (attached to camera, no gun model)
+    if (!camera.parent) scene.add(camera);
+    const flashGeo = new THREE.SphereGeometry(0.06, 6, 6);
+    const flashMat = new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0, depthTest: false });
+    muzzleFlashMesh = new THREE.Mesh(flashGeo, flashMat);
+    muzzleFlashMesh.frustumCulled = false;
+    muzzleFlashMesh.renderOrder = 1000;
+    muzzleFlashMesh.position.set(0.1, -0.08, -0.5);
+    camera.add(muzzleFlashMesh);
 
     player = { x: 0, y: 0, z: 0, angle: 0 };
     playerVelY = 0;
@@ -2347,6 +2324,10 @@
     isReloading = true;
     reloadTimer = RELOAD_TIME;
     showMessage('🔄 RELOADING...', RELOAD_TIME);
+    if (reloadSound) {
+      reloadSound.currentTime = 0;
+      reloadSound.play().catch(() => {});
+    }
   }
 
   function updateReload(dt) {
@@ -2445,9 +2426,8 @@
     );
     camera.lookAt(lookTarget);
 
-    // Hide player body, gun is on camera
+    // Hide player body in FPS
     if (playerMesh) playerMesh.visible = false;
-    if (fpGunMesh) fpGunMesh.visible = true;
   }
 
   // ═══════════════════════════════════════════════════════════
