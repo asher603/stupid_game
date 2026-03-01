@@ -48,9 +48,15 @@
 
   const LOW_BLOCK_HEIGHT = 1.2;   // Height of jumpable blocks
 
+  // Player boost per level (stacks)
+  const PLAYER_SPEED_BOOST  = 0.08;   // +8% speed per level
+  const PLAYER_JUMP_BOOST   = 0.06;   // +6% jump per level
+
   // ─────────────────────────────────────
   //  LEVEL DEFINITIONS
   // ─────────────────────────────────────
+
+  const LEVEL_ICONS = ['🌃', '🪼', '🪨', '🗑️', '👻'];
 
   const LEVELS = [
     {
@@ -204,6 +210,39 @@
   //  STATE
   // ─────────────────────────────────────
 
+  // Progress (saved in localStorage)
+  let unlockedLevels = loadProgress();
+
+  function loadProgress() {
+    try {
+      const data = JSON.parse(localStorage.getItem('spongebob_run_progress'));
+      if (data && Array.isArray(data.completed)) return { completed: data.completed };
+    } catch (e) {}
+    return { completed: [] };
+  }
+
+  function saveProgress() {
+    try {
+      localStorage.setItem('spongebob_run_progress', JSON.stringify(unlockedLevels));
+    } catch (e) {}
+  }
+
+  function isLevelUnlocked(idx) {
+    if (idx === 0) return true;
+    // A level is unlocked if ALL previous levels have been completed
+    for (let i = 0; i < idx; i++) {
+      if (!unlockedLevels.completed.includes(i)) return false;
+    }
+    return true;
+  }
+
+  function markLevelCompleted(idx) {
+    if (!unlockedLevels.completed.includes(idx)) {
+      unlockedLevels.completed.push(idx);
+      saveProgress();
+    }
+  }
+
   // Audio
   let bgm, jumpSound, landSound, stepSound, throwCoinSound;
   let patrickShouts = [];
@@ -283,15 +322,14 @@
   const minimapCanvas  = document.getElementById('minimap');
   const minimapCtx     = minimapCanvas.getContext('2d');
 
+  // Level select
+  const levelSelectScreen = document.getElementById('level-select-screen');
+  const levelSelectGrid   = document.getElementById('level-select-grid');
+  const lsBackBtn         = document.getElementById('btn-ls-back');
+
   // Level bar
   const levelBar       = document.getElementById('level-bar');
   const levelProgressFill = document.getElementById('level-progress-fill');
-
-  // Level complete overlay
-  const lvlOverlay     = document.getElementById('level-complete-overlay');
-  const lvlName        = document.getElementById('lc-level-name');
-  const lvlScoreVal    = document.getElementById('lc-score-value');
-  const lvlNextBtn     = document.getElementById('btn-next-level');
 
   // ═══════════════════════════════════════════════════════════
   //  INIT THREE.JS
@@ -825,17 +863,69 @@
   //  GAME FLOW
   // ═══════════════════════════════════════════════════════════
 
-  function startGame() {
+  // ─── Level Select UI ───
+
+  function buildLevelSelectGrid() {
+    levelSelectGrid.innerHTML = '';
+    LEVELS.forEach((lvl, idx) => {
+      const unlocked  = isLevelUnlocked(idx);
+      const completed = unlockedLevels.completed.includes(idx);
+
+      const card = document.createElement('div');
+      card.className = 'level-card' + (unlocked ? '' : ' locked') + (completed ? ' completed' : '');
+
+      const icon = LEVEL_ICONS[idx] || '🎮';
+
+      card.innerHTML = `
+        <div class="level-card-icon">${icon}</div>
+        <div class="level-card-number">Level ${idx + 1}</div>
+        <div class="level-card-name">${lvl.name}</div>
+        <div class="level-card-target">Target: ${lvl.scoreTarget} pts</div>
+        <div class="level-card-stars">
+          ${completed ? '<span class="star-filled">★</span><span class="star-filled">★</span><span class="star-filled">★</span>' : '<span class="star-empty">★</span><span class="star-empty">★</span><span class="star-empty">★</span>'}
+        </div>
+        ${!unlocked ? '<div class="level-card-lock">🔒</div>' : ''}
+        ${completed ? '<div class="level-card-check">✅</div>' : ''}
+      `;
+
+      if (unlocked) {
+        card.addEventListener('click', () => {
+          startGameAtLevel(idx);
+        });
+      }
+
+      levelSelectGrid.appendChild(card);
+    });
+  }
+
+  function showLevelSelect() {
+    overlayContent.classList.add('hidden');
+    if (htpScreen) htpScreen.classList.add('hidden');
+    buildLevelSelectGrid();
+    levelSelectScreen.classList.remove('hidden');
+  }
+
+  function hideLevelSelect() {
+    levelSelectScreen.classList.add('hidden');
+    overlayContent.classList.remove('hidden');
+  }
+
+  function startGameAtLevel(levelIdx) {
     overlay.classList.remove('active');
-    if (lvlOverlay) lvlOverlay.classList.remove('active');
     hudEl.classList.add('visible');
     minimapCanvas.classList.add('visible');
     if (levelBar) levelBar.classList.add('visible');
 
-    currentLevel  = 0;
+    currentLevel  = levelIdx;
     totalScore    = 0;
     playerCoins   = 0;
     startLevel();
+  }
+
+  function startGame() {
+    // Reset any previously visible sub-screens
+    finalScoreEl.classList.add('hidden');
+    showLevelSelect();
   }
 
   function startLevel() {
@@ -896,28 +986,25 @@
     gameRunning = false;
 
     totalScore += Math.floor(score);
+    markLevelCompleted(currentLevel);
 
     if (stepSound) stepSound.pause();
+    if (bgm) bgm.pause();
 
-    // Check if there are more levels
-    if (currentLevel + 1 < LEVELS.length) {
-      // Show level complete overlay
-      if (lvlOverlay) {
-        lvlName.textContent = getLvl().name;
-        lvlScoreVal.textContent = Math.floor(score);
-        lvlNextBtn.textContent = `NEXT: ${LEVELS[currentLevel + 1].name.toUpperCase()}`;
-        lvlOverlay.classList.add('active');
-      }
+    // Always go back to level select
+    hudEl.classList.remove('visible');
+    minimapCanvas.classList.remove('visible');
+    if (levelBar) levelBar.classList.remove('visible');
+
+    if (currentLevel + 1 >= LEVELS.length) {
+      overlaySub.textContent = '\uD83C\uDF89 You beat all levels! Amazing!';
     } else {
-      // Won the game!
-      gameOver(true);
+      overlaySub.textContent = `\u2705 Level ${currentLevel + 1} complete! Choose your next level.`;
     }
-  }
-
-  function nextLevel() {
-    if (lvlOverlay) lvlOverlay.classList.remove('active');
-    currentLevel++;
-    startLevel();
+    finalScoreEl.classList.remove('hidden');
+    finalScoreVal.textContent = totalScore;
+    startBtn.textContent = 'SELECT LEVEL';
+    overlay.classList.add('active');
   }
 
   function gameOver(won) {
@@ -926,7 +1013,6 @@
     hudEl.classList.remove('visible');
     minimapCanvas.classList.remove('visible');
     if (levelBar) levelBar.classList.remove('visible');
-    if (lvlOverlay) lvlOverlay.classList.remove('active');
 
     totalScore += Math.floor(score);
 
@@ -937,7 +1023,7 @@
     }
     finalScoreEl.classList.remove('hidden');
     finalScoreVal.textContent = totalScore;
-    startBtn.textContent = 'PLAY AGAIN';
+    startBtn.textContent = 'SELECT LEVEL';
     overlay.classList.add('active');
 
     if (bgm) bgm.pause();
@@ -998,7 +1084,8 @@
 
     const canSprint = sprinting && stamina > 0;
     if (runAction) runAction.timeScale = canSprint ? 2.0 : 1.0;
-    const speed = (canSprint ? SPRINT_SPEED : PLAYER_SPEED) * dt;
+    const playerBoost = 1 + currentLevel * PLAYER_SPEED_BOOST;
+    const speed = (canSprint ? SPRINT_SPEED : PLAYER_SPEED) * playerBoost * dt;
 
     // Step sounds
     if (moving && playerOnGround) {
@@ -1034,7 +1121,8 @@
 
     // Jump
     if (keys['Space'] && playerOnGround) {
-      playerVelY = JUMP_FORCE;
+      const jumpBoost = 1 + currentLevel * PLAYER_JUMP_BOOST;
+      playerVelY = JUMP_FORCE * jumpBoost;
       playerOnGround = false;
       if (jumpSound) { jumpSound.currentTime = 0; jumpSound.play(); }
     }
@@ -1540,7 +1628,7 @@
 
   startBtn.addEventListener('click', startGame);
 
-  if (lvlNextBtn) lvlNextBtn.addEventListener('click', nextLevel);
+  if (lsBackBtn) lsBackBtn.addEventListener('click', hideLevelSelect);
 
   howToPlayBtn.addEventListener('click', () => {
     overlayContent.classList.add('hidden');

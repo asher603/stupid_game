@@ -56,7 +56,7 @@
     </div>
   </div>
 
-  <!-- Overlay (Start / Game Over / How to Play) -->
+  <!-- Overlay (Start / Game Over / How to Play / Level Select) -->
   <div id="overlay" class="active">
 
     <!-- Main Menu -->
@@ -68,12 +68,19 @@
         <span class="score-label">FINAL SCORE</span>
         <span id="final-score-value">0</span>
       </div>
-      <button id="btn-start">START GAME</button>
+      <button id="btn-start">SELECT LEVEL</button>
       <button id="btn-how-to-play">HOW TO PLAY</button>
       <div class="controls-hint">
         <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or <kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd> — Move</p>
         <p><kbd>SHIFT</kbd> — Sprint &nbsp;&nbsp; <kbd>SPACE</kbd> — Jump &nbsp;&nbsp; <kbd>C</kbd> — Throw Coin</p>
       </div>
+    </div>
+
+    <!-- Level Select Screen -->
+    <div id="level-select-screen" class="hidden">
+      <h2>SELECT LEVEL</h2>
+      <div id="level-select-grid"></div>
+      <button id="btn-ls-back">BACK</button>
     </div>
 
     <!-- How to Play Screen -->
@@ -113,20 +120,6 @@
       <button id="btn-htp-back">BACK</button>
     </div>
 
-  </div>
-
-  <!-- Level Complete Overlay -->
-  <div id="level-complete-overlay">
-    <div id="level-complete-content">
-      <div id="lc-icon">&#127942;</div>
-      <h2>LEVEL COMPLETE!</h2>
-      <p id="lc-level-name">Bikini Bottom — Night</p>
-      <div id="lc-score-box">
-        <span class="score-label">LEVEL SCORE</span>
-        <span id="lc-score-value">0</span>
-      </div>
-      <button id="btn-next-level">NEXT LEVEL</button>
-    </div>
   </div>
 
   <!-- Minimap -->
