@@ -296,6 +296,12 @@
 
   // Input
   const keys = {};
+  let cameraYaw = 0;           // Horizontal look angle (mouse)
+  let MOUSE_SENSITIVITY = 0.002;
+
+  // Settings
+  let povMode = 'third';       // 'third' or 'first'
+  const FP_EYE_HEIGHT = 2.0;   // First-person eye height above player.y
 
   // ─────────────────────────────────────
   //  DOM ELEMENTS
@@ -320,6 +326,11 @@
   const howToPlayBtn   = document.getElementById('btn-how-to-play');
   const htpScreen      = document.getElementById('how-to-play-screen');
   const htpBackBtn     = document.getElementById('btn-htp-back');
+  const settingsScreen  = document.getElementById('settings-screen');
+  const settingsBtn     = document.getElementById('btn-settings');
+  const settingsBackBtn = document.getElementById('btn-settings-back');
+  const sensitivitySlider = document.getElementById('sensitivity-slider');
+  const sensitivityValue  = document.getElementById('sensitivity-value');
   const minimapCanvas  = document.getElementById('minimap');
   const minimapCtx     = minimapCanvas.getContext('2d');
 
@@ -1446,12 +1457,25 @@
   function showLevelSelect() {
     overlayContent.classList.add('hidden');
     if (htpScreen) htpScreen.classList.add('hidden');
+    if (settingsScreen) settingsScreen.classList.add('hidden');
     buildLevelSelectGrid();
     levelSelectScreen.classList.remove('hidden');
   }
 
   function hideLevelSelect() {
     levelSelectScreen.classList.add('hidden');
+    overlayContent.classList.remove('hidden');
+  }
+
+  function showSettings() {
+    overlayContent.classList.add('hidden');
+    if (htpScreen) htpScreen.classList.add('hidden');
+    if (levelSelectScreen) levelSelectScreen.classList.add('hidden');
+    settingsScreen.classList.remove('hidden');
+  }
+
+  function hideSettings() {
+    settingsScreen.classList.add('hidden');
     overlayContent.classList.remove('hidden');
   }
 
@@ -1524,6 +1548,10 @@
 
     showMessage(`🏁 LEVEL ${currentLevel + 1}: ${lvl.name}`, 3);
     gameRunning = true;
+
+    // Initialise camera yaw from player facing direction & request pointer lock
+    cameraYaw = player.angle + Math.PI;   // camera behind player
+    requestPointerLock();
   }
 
   function completeLevel() {
@@ -1651,12 +1679,9 @@
       if (stepSound && !stepSound.paused) stepSound.pause();
     }
 
-    // Movement
+    // Movement — direction derived from mouse-controlled cameraYaw
     if (moving) {
-      const camFwdX = player.x - camera.position.x;
-      const camFwdZ = player.z - camera.position.z;
-      const camLen  = Math.sqrt(camFwdX * camFwdX + camFwdZ * camFwdZ) || 1;
-      const fwdX = camFwdX / camLen, fwdZ = camFwdZ / camLen;
+      const fwdX = Math.sin(cameraYaw), fwdZ = Math.cos(cameraYaw);
       const rightX = -fwdZ, rightZ = fwdX;
 
       let moveX = fwdX * inputForward + rightX * inputRight;
@@ -1664,7 +1689,7 @@
       const len = Math.sqrt(moveX * moveX + moveZ * moveZ);
       moveX /= len; moveZ /= len;
 
-      player.angle = lerpAngle(player.angle, Math.atan2(moveX, moveZ), 5 * dt);
+      player.angle = lerpAngle(player.angle, Math.atan2(moveX, moveZ), 10 * dt);
 
       let nx = player.x + moveX * speed;
       let nz = player.z + moveZ * speed;
@@ -1997,17 +2022,36 @@
   // ═══════════════════════════════════════════════════════════
 
   function updateCamera(dt) {
-    if (keys['KeyQ']) cameraHeight = Math.min(CAMERA_HEIGHT_MAX, cameraHeight + CAMERA_HEIGHT_SPEED * dt);
-    if (keys['KeyE']) cameraHeight = Math.max(CAMERA_HEIGHT_MIN, cameraHeight - CAMERA_HEIGHT_SPEED * dt);
+    if (povMode === 'first') {
+      // First-person: camera at player's eyes, looking forward
+      const eyePos = new THREE.Vector3(player.x, player.y + FP_EYE_HEIGHT, player.z);
+      camera.position.copy(eyePos);
+      const lookTarget = new THREE.Vector3(
+        player.x + Math.sin(cameraYaw),
+        player.y + FP_EYE_HEIGHT,
+        player.z + Math.cos(cameraYaw)
+      );
+      camera.lookAt(lookTarget);
 
-    const idealOffset = new THREE.Vector3(
-      -Math.sin(player.angle) * CAMERA_DIST,
-      cameraHeight,
-      -Math.cos(player.angle) * CAMERA_DIST
-    );
-    const idealTarget = new THREE.Vector3(player.x, player.y + 2, player.z);
-    camera.position.lerp(idealTarget.clone().add(idealOffset), CAMERA_LERP * dt);
-    camera.lookAt(new THREE.Vector3(player.x, player.y + 1.5, player.z));
+      // Hide player mesh in first person
+      if (playerMesh) playerMesh.visible = false;
+    } else {
+      // Third-person: orbiting camera
+      if (keys['KeyQ']) cameraHeight = Math.min(CAMERA_HEIGHT_MAX, cameraHeight + CAMERA_HEIGHT_SPEED * dt);
+      if (keys['KeyE']) cameraHeight = Math.max(CAMERA_HEIGHT_MIN, cameraHeight - CAMERA_HEIGHT_SPEED * dt);
+
+      const idealOffset = new THREE.Vector3(
+        -Math.sin(cameraYaw) * CAMERA_DIST,
+        cameraHeight,
+        -Math.cos(cameraYaw) * CAMERA_DIST
+      );
+      const idealTarget = new THREE.Vector3(player.x, player.y + 2, player.z);
+      camera.position.lerp(idealTarget.clone().add(idealOffset), CAMERA_LERP * dt);
+      camera.lookAt(new THREE.Vector3(player.x, player.y + 1.5, player.z));
+
+      // Show player mesh in third person
+      if (playerMesh) playerMesh.visible = true;
+    }
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -2168,6 +2212,23 @@
   document.addEventListener('keyup', (e) => { keys[e.code] = false; });
   window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
 
+  // ── Pointer Lock (FPS-style mouse look) ──
+  document.addEventListener('mousemove', (e) => {
+    if (document.pointerLockElement !== renderer.domElement) return;
+    cameraYaw -= e.movementX * MOUSE_SENSITIVITY;
+  });
+
+  function requestPointerLock() {
+    renderer.domElement.requestPointerLock();
+  }
+
+  // Click on canvas to re-acquire pointer lock if lost
+  document.addEventListener('click', () => {
+    if (gameRunning && document.pointerLockElement !== renderer.domElement) {
+      requestPointerLock();
+    }
+  });
+
   // ═══════════════════════════════════════════════════════════
   //  MAIN LOOP
   // ═══════════════════════════════════════════════════════════
@@ -2195,6 +2256,28 @@
   htpBackBtn.addEventListener('click', () => {
     htpScreen.classList.add('hidden');
     overlayContent.classList.remove('hidden');
+  });
+
+  // Settings screen
+  if (settingsBtn) settingsBtn.addEventListener('click', showSettings);
+  if (settingsBackBtn) settingsBackBtn.addEventListener('click', hideSettings);
+
+  // Sensitivity slider
+  if (sensitivitySlider) {
+    sensitivitySlider.addEventListener('input', () => {
+      const val = parseFloat(sensitivitySlider.value);
+      MOUSE_SENSITIVITY = val / 2000;   // range 1-20 → 0.0005 – 0.01
+      if (sensitivityValue) sensitivityValue.textContent = val.toFixed(1);
+    });
+  }
+
+  // POV toggle buttons
+  document.querySelectorAll('.pov-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.pov-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      povMode = btn.dataset.pov;
+    });
   });
 
   // Load Patrick
