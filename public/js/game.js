@@ -461,9 +461,20 @@
       const w = 3 + Math.random() * 5;
       const h = 3 + Math.random() * 10;
       const d = 3 + Math.random() * 5;
-      const x = (Math.random() - 0.5) * (WORLD_SIZE - 16);
-      const z = (Math.random() - 0.5) * (WORLD_SIZE - 16);
-      if (Math.abs(x) < 8 && Math.abs(z) < 8) continue;
+      let x, z, att = 0, overlap;
+      do {
+        x = (Math.random() - 0.5) * (WORLD_SIZE - 16);
+        z = (Math.random() - 0.5) * (WORLD_SIZE - 16);
+        overlap = false;
+        if (Math.abs(x) < 8 && Math.abs(z) < 8) { overlap = true; continue; }
+        for (const b of buildings) {
+          if (Math.abs(x - b.x) < b.hw + w / 2 + 1.5 && Math.abs(z - b.z) < b.hd + d / 2 + 1.5) {
+            overlap = true; break;
+          }
+        }
+        att++;
+      } while (overlap && att < 30);
+      if (overlap) continue;
 
       const mesh = new THREE.Mesh(
         new THREE.BoxGeometry(w, h, d),
@@ -517,6 +528,78 @@
       scene.add(edge);
 
       lowBlocks.push({ mesh, x, z, hw: w / 2, hd: d / 2, h: LOW_BLOCK_HEIGHT });
+    }
+
+    // Platform Chains — stepping stone groups to jump between
+    const chainCount = Math.max(2, Math.floor(lvl.lowBlockCount / 3));
+    for (let c = 0; c < chainCount; c++) {
+      // Pick a center for this chain
+      const chainX = (Math.random() - 0.5) * (WORLD_SIZE - 24);
+      const chainZ = (Math.random() - 0.5) * (WORLD_SIZE - 24);
+      if (Math.abs(chainX) < 10 && Math.abs(chainZ) < 10) continue;
+
+      const stepsInChain = 3 + Math.floor(Math.random() * 3); // 3-5 steps
+      const chainAngle = Math.random() * Math.PI * 2;
+      let prevH = LOW_BLOCK_HEIGHT;
+      let valid = true;
+
+      const chainBlocks = [];
+      for (let s = 0; s < stepsInChain; s++) {
+        const stepW = 1.5 + Math.random() * 1.0;
+        const stepD = 1.5 + Math.random() * 1.0;
+        // Each step is 2.5-3.5 units apart along the chain direction
+        const spacing = 2.5 + Math.random() * 1.0;
+        const sx = chainX + Math.cos(chainAngle) * spacing * s + (Math.random() - 0.5) * 0.5;
+        const sz = chainZ + Math.sin(chainAngle) * spacing * s + (Math.random() - 0.5) * 0.5;
+        // Height gradually increases (each step 0.3-0.6 higher)
+        const stepH = Math.min(prevH + 0.3 + Math.random() * 0.3, 3.5);
+        prevH = stepH;
+
+        // Check no overlap with buildings or existing low blocks
+        let stepOverlap = false;
+        for (const b of buildings) {
+          if (Math.abs(sx - b.x) < b.hw + stepW / 2 + 1 && Math.abs(sz - b.z) < b.hd + stepD / 2 + 1) { stepOverlap = true; break; }
+        }
+        if (stepOverlap) { valid = false; break; }
+        for (const lb of lowBlocks) {
+          if (Math.abs(sx - lb.x) < lb.hw + stepW / 2 + 0.5 && Math.abs(sz - lb.z) < lb.hd + stepD / 2 + 0.5) { stepOverlap = true; break; }
+        }
+        if (stepOverlap) { valid = false; break; }
+
+        chainBlocks.push({ x: sx, z: sz, w: stepW, d: stepD, h: stepH });
+      }
+
+      if (!valid || chainBlocks.length < 3) continue;
+
+      // Place all steps of this chain
+      for (const step of chainBlocks) {
+        const stepMesh = new THREE.Mesh(
+          new THREE.BoxGeometry(step.w, step.h, step.d),
+          new THREE.MeshStandardMaterial({ color: lvl.lowBlockColor, roughness: 0.5, metalness: 0.4 })
+        );
+        stepMesh.position.set(step.x, step.h / 2, step.z);
+        stepMesh.castShadow = true;
+        stepMesh.receiveShadow = true;
+        scene.add(stepMesh);
+
+        // Glow edge on top
+        const edgeGeo = new THREE.BoxGeometry(step.w + 0.05, 0.06, step.d + 0.05);
+        const edgeMat = new THREE.MeshBasicMaterial({ color: lvl.lowBlockGlow, transparent: true, opacity: 0.45 });
+        const edge = new THREE.Mesh(edgeGeo, edgeMat);
+        edge.position.set(step.x, step.h + 0.03, step.z);
+        scene.add(edge);
+
+        // Arrow/indicator showing direction to next step (decorative)
+        lowBlocks.push({ mesh: stepMesh, x: step.x, z: step.z, hw: step.w / 2, hd: step.d / 2, h: step.h });
+      }
+
+      // Add a coin on top of the highest platform as reward
+      const highest = chainBlocks[chainBlocks.length - 1];
+      const rewardMesh = createCoinMesh();
+      const rewardY = highest.h + 1.2;
+      rewardMesh.position.set(highest.x, rewardY, highest.z);
+      scene.add(rewardMesh);
+      coins.push({ mesh: rewardMesh, x: highest.x, z: highest.z, baseY: rewardY, airborne: true, collected: false });
     }
 
     // Trees
@@ -1389,33 +1472,39 @@
   //  LOW BLOCK HELPERS
   // ═══════════════════════════════════════════════════════════
 
-  // Check if position (x, z) is over a low block — returns the block or null
+  // Check if position (x, z) is over a low block — returns the highest block or null
   function getLowBlockAt(x, z) {
+    let best = null;
     for (const lb of lowBlocks) {
       if (Math.abs(x - lb.x) < lb.hw && Math.abs(z - lb.z) < lb.hd) {
-        return lb;
+        if (!best || lb.h > best.h) best = lb;
       }
     }
-    return null;
+    return best;
   }
 
   // Resolve XZ collisions against low blocks for entities that CANNOT climb them
   function resolveLowBlockCollisions(x, z, radius) {
-    for (const lb of lowBlocks) {
-      const cx = Math.max(lb.x - lb.hw, Math.min(x, lb.x + lb.hw));
-      const cz = Math.max(lb.z - lb.hd, Math.min(z, lb.z + lb.hd));
-      const dx = x - cx;
-      const dz = z - cz;
-      const dist = Math.sqrt(dx * dx + dz * dz);
-      if (dist < radius) {
-        if (dist === 0) {
-          x = lb.x + lb.hw + radius;
-        } else {
-          const push = radius - dist;
-          x += (dx / dist) * push;
-          z += (dz / dist) * push;
+    for (let pass = 0; pass < 3; pass++) {
+      let resolved = false;
+      for (const lb of lowBlocks) {
+        const cx = Math.max(lb.x - lb.hw, Math.min(x, lb.x + lb.hw));
+        const cz = Math.max(lb.z - lb.hd, Math.min(z, lb.z + lb.hd));
+        const dx = x - cx;
+        const dz = z - cz;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist < radius) {
+          if (dist === 0) {
+            x = lb.x + lb.hw + radius;
+          } else {
+            const push = radius - dist;
+            x += (dx / dist) * push;
+            z += (dz / dist) * push;
+          }
+          resolved = true;
         }
       }
+      if (!resolved) break;
     }
     return { x, z };
   }
@@ -1690,20 +1779,11 @@
 
       let nx = player.x + moveX * speed;
       let nz = player.z + moveZ * speed;
-      const resolved = resolveCollisions(nx, nz, 0.6);
-      let finalX = Math.max(-HALF_WORLD + 1, Math.min(HALF_WORLD - 1, resolved.x));
-      let finalZ = Math.max(-HALF_WORLD + 1, Math.min(HALF_WORLD - 1, resolved.z));
 
-      // If player is below block top, treat low blocks as walls
-      const blockAtNew = getLowBlockAt(finalX, finalZ);
-      if (blockAtNew && player.y < blockAtNew.h) {
-        const lbResolved = resolveLowBlockCollisions(finalX, finalZ, 0.6);
-        finalX = Math.max(-HALF_WORLD + 1, Math.min(HALF_WORLD - 1, lbResolved.x));
-        finalZ = Math.max(-HALF_WORLD + 1, Math.min(HALF_WORLD - 1, lbResolved.z));
-      }
-
-      player.x = finalX;
-      player.z = finalZ;
+      // Axis-separated collision — buildings, trees, and low blocks (when below)
+      const resolved = moveWithCollision(player.x, player.z, nx, nz, 0.6, player.y);
+      player.x = Math.max(-HALF_WORLD + 1, Math.min(HALF_WORLD - 1, resolved.x));
+      player.z = Math.max(-HALF_WORLD + 1, Math.min(HALF_WORLD - 1, resolved.z));
     }
 
     // Jump
@@ -1719,22 +1799,18 @@
     playerVelY -= GRAVITY * dt;
     player.y += playerVelY * dt;
 
-    // Floor or low block landing — only land on blocks from above
+    // Floor or low block landing
     const blockBelow = getLowBlockAt(player.x, player.z);
-    if (blockBelow && prevY >= blockBelow.h) {
-      // Player was at or above block top — can land on it
-      if (player.y <= blockBelow.h) {
-        player.y = blockBelow.h;
-        playerVelY = 0;
-        playerOnGround = true;
-      }
-    } else {
-      // No block above player, or player is below block top — land on ground
-      if (player.y <= 0) {
-        player.y = 0;
-        playerVelY = 0;
-        playerOnGround = true;
-      }
+    if (blockBelow && prevY >= blockBelow.h - 0.1 && player.y <= blockBelow.h) {
+      // Player was at or near block top and is now at/below it — land
+      player.y = blockBelow.h;
+      playerVelY = 0;
+      playerOnGround = true;
+    } else if (player.y <= 0) {
+      // Land on ground
+      player.y = 0;
+      playerVelY = 0;
+      playerOnGround = true;
     }
 
     playerMesh.position.set(player.x, player.y, player.z);
@@ -2026,7 +2102,7 @@
       const coinY = coin.mesh.position.y;
       const distY = Math.abs(playerCenterY - coinY);
 
-      if (distXZ < 1.5 && distY < 1.5) {
+      if (distXZ < 0.9 && distY < 1.2) {
         coin.collected = true;
         scene.remove(coin.mesh);
         score += COIN_SCORE;
@@ -2092,16 +2168,90 @@
   //  COLLISION
   // ═══════════════════════════════════════════════════════════
 
-  function resolveCollisions(x, z, radius) {
+  // Check if a circle at (x,z) with given radius overlaps any building
+  function collidesBuilding(x, z, radius) {
     for (const b of buildings) {
       const cx = Math.max(b.x - b.hw, Math.min(x, b.x + b.hw));
       const cz = Math.max(b.z - b.hd, Math.min(z, b.z + b.hd));
       const dx = x - cx, dz = z - cz;
-      const dist = Math.sqrt(dx * dx + dz * dz);
-      if (dist < radius) {
-        if (dist === 0) { x = b.x + b.hw + radius; }
-        else { const push = radius - dist; x += (dx / dist) * push; z += (dz / dist) * push; }
+      if (dx * dx + dz * dz < radius * radius) return true;
+    }
+    return false;
+  }
+
+  // Check if a circle at (x,z) with given radius overlaps any tree
+  function collidesTree(x, z, radius) {
+    for (const t of trees) {
+      const dx = x - t.x, dz = z - t.z;
+      if (dx * dx + dz * dz < (t.r + radius) * (t.r + radius)) return true;
+    }
+    return false;
+  }
+
+  // Check if a circle at (x,z) overlaps any low block where entity is below block top
+  function collidesLowBlock(x, z, radius, entityY) {
+    for (const lb of lowBlocks) {
+      if (entityY >= lb.h) continue; // on top of this block — no collision
+      const cx = Math.max(lb.x - lb.hw, Math.min(x, lb.x + lb.hw));
+      const cz = Math.max(lb.z - lb.hd, Math.min(z, lb.z + lb.hd));
+      const dx = x - cx, dz = z - cz;
+      if (dx * dx + dz * dz < radius * radius) return true;
+    }
+    return false;
+  }
+
+  // Axis-separated collision: try moving from (oldX,oldZ) to (newX,newZ)
+  // Returns the furthest valid position, allowing wall-sliding
+  function moveWithCollision(oldX, oldZ, newX, newZ, radius, entityY) {
+    let outX = oldX, outZ = oldZ;
+
+    // Try X axis
+    if (!collidesBuilding(newX, oldZ, radius) &&
+        !collidesTree(newX, oldZ, radius) &&
+        !collidesLowBlock(newX, oldZ, radius, entityY)) {
+      outX = newX;
+    }
+
+    // Try Z axis
+    if (!collidesBuilding(outX, newZ, radius) &&
+        !collidesTree(outX, newZ, radius) &&
+        !collidesLowBlock(outX, newZ, radius, entityY)) {
+      outZ = newZ;
+    }
+
+    return { x: outX, z: outZ };
+  }
+
+  // Legacy push-based resolve (still used by enemies for simpler avoidance)
+  function resolveCollisions(x, z, radius) {
+    for (let pass = 0; pass < 3; pass++) {
+      let pushed = false;
+      for (const b of buildings) {
+        const cx = Math.max(b.x - b.hw, Math.min(x, b.x + b.hw));
+        const cz = Math.max(b.z - b.hd, Math.min(z, b.z + b.hd));
+        const dx = x - cx, dz = z - cz;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist < radius) {
+          if (dist < 0.001) {
+            // Deep inside — push toward nearest edge
+            const edgeDistLeft  = Math.abs(x - (b.x - b.hw));
+            const edgeDistRight = Math.abs(x - (b.x + b.hw));
+            const edgeDistFront = Math.abs(z - (b.z - b.hd));
+            const edgeDistBack  = Math.abs(z - (b.z + b.hd));
+            const minEdge = Math.min(edgeDistLeft, edgeDistRight, edgeDistFront, edgeDistBack);
+            if (minEdge === edgeDistLeft)       x = b.x - b.hw - radius;
+            else if (minEdge === edgeDistRight) x = b.x + b.hw + radius;
+            else if (minEdge === edgeDistFront) z = b.z - b.hd - radius;
+            else                                 z = b.z + b.hd + radius;
+          } else {
+            const push = radius - dist;
+            x += (dx / dist) * push;
+            z += (dz / dist) * push;
+          }
+          pushed = true;
+        }
       }
+      if (!pushed) break;
     }
     for (const t of trees) {
       const dx = x - t.x, dz = z - t.z;
