@@ -1315,12 +1315,15 @@
       x = (Math.random() - 0.5) * (WORLD_SIZE - 12);
       z = (Math.random() - 0.5) * (WORLD_SIZE - 12);
       att++;
-    } while (att < 20 && isInsideBuilding(x, z));
+    } while (att < 40 && isNearObstacle(x, z));
+
+    const airborne = Math.random() < 0.35;
+    const baseY = airborne ? 2.5 + Math.random() * 0.5 : 1.2;
 
     const mesh = createCoinMesh();
-    mesh.position.set(x, 1.2, z);
+    mesh.position.set(x, baseY, z);
     scene.add(mesh);
-    coins.push({ mesh, x, z, collected: false });
+    coins.push({ mesh, x, z, baseY, airborne, collected: false });
   }
 
   function respawnCoin(coin) {
@@ -1329,10 +1332,10 @@
       nx = (Math.random() - 0.5) * (WORLD_SIZE - 12);
       nz = (Math.random() - 0.5) * (WORLD_SIZE - 12);
       att++;
-    } while (att < 20 && isInsideBuilding(nx, nz));
+    } while (att < 40 && isNearObstacle(nx, nz));
     coin.x = nx;
     coin.z = nz;
-    coin.mesh.position.set(nx, 1.2, nz);
+    coin.mesh.position.set(nx, coin.baseY, nz);
     coin.collected = false;
     scene.add(coin.mesh);
   }
@@ -1358,13 +1361,26 @@
     const mesh = createCoinMesh();
     mesh.position.set(cx, 1.2, cz);
     scene.add(mesh);
-    coins.push({ mesh, x: cx, z: cz, collected: false });
+    coins.push({ mesh, x: cx, z: cz, baseY: 1.2, airborne: false, collected: false });
     showMessage('💰 COIN THROWN!', 1);
   }
 
   function isInsideBuilding(x, z) {
     for (const b of buildings) {
       if (Math.abs(x - b.x) < b.hw && Math.abs(z - b.z) < b.hd) return true;
+    }
+    return false;
+  }
+
+  // Check if position is near any obstacle (building, tree, low block)
+  function isNearObstacle(x, z) {
+    if (isInsideBuilding(x, z)) return true;
+    for (const t of trees) {
+      const dx = x - t.x, dz = z - t.z;
+      if (Math.sqrt(dx * dx + dz * dz) < t.r + 1.2) return true;
+    }
+    for (const lb of lowBlocks) {
+      if (Math.abs(x - lb.x) < lb.hw + 0.8 && Math.abs(z - lb.z) < lb.hd + 0.8) return true;
     }
     return false;
   }
@@ -1675,8 +1691,19 @@
       let nx = player.x + moveX * speed;
       let nz = player.z + moveZ * speed;
       const resolved = resolveCollisions(nx, nz, 0.6);
-      player.x = Math.max(-HALF_WORLD + 1, Math.min(HALF_WORLD - 1, resolved.x));
-      player.z = Math.max(-HALF_WORLD + 1, Math.min(HALF_WORLD - 1, resolved.z));
+      let finalX = Math.max(-HALF_WORLD + 1, Math.min(HALF_WORLD - 1, resolved.x));
+      let finalZ = Math.max(-HALF_WORLD + 1, Math.min(HALF_WORLD - 1, resolved.z));
+
+      // If player is below block top, treat low blocks as walls
+      const blockAtNew = getLowBlockAt(finalX, finalZ);
+      if (blockAtNew && player.y < blockAtNew.h) {
+        const lbResolved = resolveLowBlockCollisions(finalX, finalZ, 0.6);
+        finalX = Math.max(-HALF_WORLD + 1, Math.min(HALF_WORLD - 1, lbResolved.x));
+        finalZ = Math.max(-HALF_WORLD + 1, Math.min(HALF_WORLD - 1, lbResolved.z));
+      }
+
+      player.x = finalX;
+      player.z = finalZ;
     }
 
     // Jump
@@ -1688,17 +1715,26 @@
     }
 
     // Gravity
+    const prevY = player.y;
     playerVelY -= GRAVITY * dt;
     player.y += playerVelY * dt;
 
-    // Floor or low block landing
+    // Floor or low block landing — only land on blocks from above
     const blockBelow = getLowBlockAt(player.x, player.z);
-    const floorY = blockBelow ? blockBelow.h : 0;
-
-    if (player.y <= floorY) {
-      player.y = floorY;
-      playerVelY = 0;
-      playerOnGround = true;
+    if (blockBelow && prevY >= blockBelow.h) {
+      // Player was at or above block top — can land on it
+      if (player.y <= blockBelow.h) {
+        player.y = blockBelow.h;
+        playerVelY = 0;
+        playerOnGround = true;
+      }
+    } else {
+      // No block above player, or player is below block top — land on ground
+      if (player.y <= 0) {
+        player.y = 0;
+        playerVelY = 0;
+        playerOnGround = true;
+      }
     }
 
     playerMesh.position.set(player.x, player.y, player.z);
@@ -1980,11 +2016,17 @@
   function updateCoins(dt) {
     for (const coin of coins) {
       if (coin.collected) continue;
-      coin.mesh.position.y = 1.2 + Math.sin(gameTime * 3 + coin.x) * 0.3;
+      coin.mesh.position.y = coin.baseY + Math.sin(gameTime * 3 + coin.x) * 0.3;
       coin.mesh.rotation.y += dt * 3;
 
       const dx = player.x - coin.x, dz = player.z - coin.z;
-      if (Math.sqrt(dx * dx + dz * dz) < 1.5) {
+      const distXZ = Math.sqrt(dx * dx + dz * dz);
+      // Player center is roughly 1.0 above player.y (feet)
+      const playerCenterY = player.y + 1.0;
+      const coinY = coin.mesh.position.y;
+      const distY = Math.abs(playerCenterY - coinY);
+
+      if (distXZ < 1.5 && distY < 1.5) {
         coin.collected = true;
         scene.remove(coin.mesh);
         score += COIN_SCORE;
